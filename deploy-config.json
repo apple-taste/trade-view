@@ -1,0 +1,10 @@
+{
+  "repo_url": "https://github.com/apple-taste/trade-view",
+  "service_name": "trade-view",
+  "branch": "main",
+  "port": 8000,
+  "env_vars": {
+    "NODE_ENV": "production",
+    "LOG_LEVEL": "info"
+  }
+}
