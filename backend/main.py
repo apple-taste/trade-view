@@ -294,14 +294,16 @@ logger.info("✅ 路由注册完成")
 async def root():
     logger.info("📋 根路径访问")
     # 如果静态文件存在，返回index.html，否则返回API信息
-    static_dir = Path(__file__).parent.parent / "static"
+    # 在Docker容器中，静态文件在/app/static（与main.py同级目录）
+    static_dir = Path(__file__).parent / "static"
     index_file = static_dir / "index.html" if static_dir.exists() else None
     if index_file and index_file.exists():
         return FileResponse(str(index_file))
     return {"message": "A股交易管理系统 API", "docs": "/docs"}
 
 # 静态文件服务（用于前端）- 必须在其他路由之后
-static_dir = Path(__file__).parent.parent / "static"
+# 在Docker容器中，静态文件在/app/static（与main.py同级目录）
+static_dir = Path(__file__).parent / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
     logger.info(f"✅ 静态文件服务已挂载: {static_dir}")
