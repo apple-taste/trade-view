@@ -75,14 +75,14 @@ async def lifespan(app: FastAPI):
     
     logger.info("=" * 80)
     
-    # 启动时初始化数据库
+    # 启动时初始化数据库（非阻塞，失败不阻止启动）
     logger.info("📦 [数据库] 正在初始化数据库...")
     try:
         await init_db()
         logger.info("✅ [数据库] 数据库初始化完成")
     except Exception as e:
         logger.error(f"❌ [数据库] 数据库初始化失败: {e}", exc_info=True)
-        raise
+        logger.warning("⚠️  [数据库] 数据库初始化失败，但应用将继续运行")
     
     # 启动价格监控服务（非关键服务，失败不阻止启动）
     logger.info("📊 [价格监控] 正在启动价格监控服务...")
