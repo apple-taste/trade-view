@@ -1,0 +1,131 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  min-height: 100vh;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* JoJo主题样式 */
+@layer components {
+  .jojo-card {
+    background: linear-gradient(to bottom right, #16213e, #1a1a2e);
+    @apply rounded-lg shadow-2xl;
+    border: 2px solid #FFD700;
+    @apply transform transition-all duration-300;
+  }
+  
+  .jojo-card:hover {
+    box-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
+    animation: jojo-glow 2s ease-in-out infinite alternate;
+  }
+  
+  /* 禁用特定卡片的hover放大效果 */
+  .jojo-card-no-scale:hover {
+    @apply scale-100;
+  }
+  
+  .jojo-button {
+    @apply px-6 py-3 font-bold text-white rounded-lg;
+    background: linear-gradient(to right, #FFD700, #FFA500);
+    border: 2px solid #FFA500;
+    @apply transform transition-all duration-200;
+    @apply shadow-lg;
+  }
+  
+  .jojo-button:hover {
+    @apply scale-110 shadow-xl;
+    animation: jojo-pulse 1s ease-in-out infinite;
+  }
+  
+  .jojo-button-danger {
+    @apply px-6 py-3 font-bold text-white rounded-lg;
+    background: linear-gradient(to right, #c41e3a, #8b0000);
+    border: 2px solid #8b0000;
+    @apply transform transition-all duration-200;
+    @apply shadow-lg;
+  }
+  
+  .jojo-button-danger:hover {
+    @apply scale-110 shadow-xl;
+    animation: jojo-pulse 1s ease-in-out infinite;
+  }
+  
+  .jojo-title {
+    @apply text-3xl font-bold;
+    background: linear-gradient(to right, #FFD700, #FFA500, #FFD700);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    @apply drop-shadow-lg;
+  }
+  
+  .jojo-table {
+    @apply w-full border-collapse;
+  }
+  
+  .jojo-table th {
+    background-color: #16213e;
+    color: #FFD700;
+    @apply font-bold py-3 px-4;
+    border-bottom: 2px solid #FFD700;
+  }
+  
+  .jojo-table td {
+    background-color: #1a1a2e;
+    @apply text-white py-3 px-4;
+    border-bottom: 1px solid #16213e;
+  }
+  
+  .jojo-table tr:hover {
+    background-color: #16213e;
+    @apply transform transition-all duration-200;
+  }
+  
+  .jojo-input {
+    @apply w-full px-4 py-2 text-white rounded-lg;
+    background-color: #16213e;
+    border: 2px solid #FFD700;
+    @apply focus:outline-none;
+  }
+  
+  .jojo-input:focus {
+    border-color: #FFA500;
+    box-shadow: 0 0 0 2px rgba(255, 215, 0, 0.5);
+  }
+  
+  .jojo-input::placeholder {
+    @apply text-gray-400;
+  }
+  
+  /* 自定义滚动条样式 */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: #16213e;
+    border-radius: 3px;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #FFD700;
+    border-radius: 3px;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #FFA500;
+  }
+}

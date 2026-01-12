@@ -1,0 +1,727 @@
+import { useEffect, useState } from 'react';
+import axios from 'axios';
+import { Plus, Edit, Trash2, Calendar, List, Trash } from 'lucide-react';
+import { useTrade } from '../../contexts/TradeContext';
+import { useAlerts } from '../../contexts/AlertContext';
+import { logger } from '../../utils/logger';
+import { useJojoModal } from '../JojoModal';
+
+// 北京时间工具函数（UTC+8）
+const BEIJING_TIMEZONE_OFFSET = 8 * 60; // 8小时 = 480分钟
+
+// 将UTC时间转换为北京时间字符串（用于datetime-local输入框）
+const utcToBeijingTime = (utcDate: Date | string): string => {
+  const date = typeof utcDate === 'string' ? new Date(utcDate) : utcDate;
+  // 创建北京时间（UTC+8）
+  // 使用UTC方法确保时区转换正确
+  const utcTime = date.getTime();
+  const beijingTime = new Date(utcTime + BEIJING_TIMEZONE_OFFSET * 60000);
+  // 格式化为 YYYY-MM-DDTHH:mm（使用UTC方法确保格式正确）
+  const year = beijingTime.getUTCFullYear();
+  const month = String(beijingTime.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(beijingTime.getUTCDate()).padStart(2, '0');
+  const hour = String(beijingTime.getUTCHours()).padStart(2, '0');
+  const minute = String(beijingTime.getUTCMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hour}:${minute}`;
+};
+
+// 将北京时间字符串（来自datetime-local输入框）转换为UTC时间字符串
+const beijingTimeToUTC = (beijingTimeString: string): string => {
+  // datetime-local输入框返回的是本地时间格式（YYYY-MM-DDTHH:mm）
+  // 我们需要将其视为北京时间（UTC+8），然后转换为UTC
+  // 正确方法：直接构造UTC时间，然后减去8小时
+  // 例如：2026-01-23T14:30 (北京时间) -> 2026-01-23T06:30:00Z (UTC时间)
+  const [datePart, timePart] = beijingTimeString.split('T');
+  const [year, month, day] = datePart.split('-').map(Number);
+  const [hour, minute] = timePart.split(':').map(Number);
+  
+  // 直接构造UTC时间对象（使用Date.UTC创建UTC时间戳）
+  // 然后减去8小时（480分钟）得到真正的UTC时间
+  const utcTimestamp = Date.UTC(year, month - 1, day, hour, minute) - BEIJING_TIMEZONE_OFFSET * 60000;
+  const utcDate = new Date(utcTimestamp);
+  return utcDate.toISOString();
+};
+
+// 获取当前北京时间（用于默认值）
+const getCurrentBeijingTime = (): string => {
+  const now = new Date();
+  return utcToBeijingTime(now);
+};
+
+interface Trade {
+  id: number;
+  stock_code: string;
+  stock_name?: string;
+  open_time: string;
+  close_time?: string;  // 离场时间（平仓时间）
+  shares: number;
+  commission: number;  // 总手续费
+  buy_commission?: number;  // 买入手续费
+  sell_commission?: number;  // 卖出手续费
+  theoretical_risk_reward_ratio?: number;  // 理论风险回报比
+  actual_risk_reward_ratio?: number;  // 实际风险回报比
+  buy_price: number;
+  sell_price?: number;
+  stop_loss_price?: number;
+  take_profit_price?: number;
+  stop_loss_alert: boolean;
+  take_profit_alert: boolean;
+  current_price?: number;
+  holding_days: number;
+  order_result?: string;
+  notes?: string;
+  status?: string;
+  price_source?: string;
+  risk_reward_ratio?: number; // 风险回报比
+}
+
+interface TradeHistoryPanelProps {
+  selectedDate: string;
+}
+
+export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelProps) {
+  const { confirm, Modal } = useJojoModal();
+  const [trades, setTrades] = useState<Trade[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
+  const [viewMode, setViewMode] = useState<'date' | 'all'>('date');
+  const { refreshCalendar, refreshPositions, refreshAnalysis, refreshUserPanel, refreshTradeHistory, _tradeHistoryRefreshKey } = useTrade();
+  const { clearAlertsByStockCode } = useAlerts();
+  // 将选中日期转换为北京时间格式（用于datetime-local输入框）
+  const getSelectedDateBeijingTime = (): string => {
+    if (selectedDate) {
+      // selectedDate是YYYY-MM-DD格式，需要转换为YYYY-MM-DDTHH:mm格式
+      // 默认使用当前时间的时分，但日期使用selectedDate
+      const now = new Date();
+      const beijingNow = utcToBeijingTime(now);
+      // 提取时分部分
+      const timePart = beijingNow.split('T')[1];
+      // 组合为选中日期的北京时间
+      return `${selectedDate}T${timePart}`;
+    }
+    return getCurrentBeijingTime();
+  };
+
+  const [formData, setFormData] = useState({
+    stock_code: '',
+    stock_name: '',
+    open_time: getSelectedDateBeijingTime(), // 使用选中日期的北京时间
+    shares: '',
+    commission: '0',
+    buy_commission: '',  // 买入手续费，留空自动计算
+    sell_commission: '',  // 卖出手续费，留空自动计算
+    buy_price: '',
+    stop_loss_price: '',
+    take_profit_price: '',
+    stop_loss_alert: false,
+    take_profit_alert: false,
+    notes: ''
+  });
+
+  useEffect(() => {
+    fetchTrades();
+  }, [selectedDate, viewMode, _tradeHistoryRefreshKey]);
+
+  const fetchTrades = async () => {
+    setLoading(true);
+    try {
+      if (viewMode === 'all') {
+        const response = await axios.get('/api/trades');
+        setTrades(response.data);
+      } else {
+        const response = await axios.get(`/api/trades/date/${selectedDate}`);
+        setTrades(response.data);
+      }
+    } catch (error) {
+      console.error('获取交易记录失败:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      // 将北京时间转换为UTC时间发送给后端
+      const utcTimeString = beijingTimeToUTC(formData.open_time);
+      
+      const data = {
+        ...formData,
+        shares: parseInt(formData.shares),
+        commission: parseFloat(formData.commission),
+        buy_commission: formData.buy_commission ? parseFloat(formData.buy_commission) : undefined,  // 买入手续费（留空自动计算）
+        sell_commission: formData.sell_commission ? parseFloat(formData.sell_commission) : undefined,  // 卖出手续费（留空自动计算）
+        buy_price: parseFloat(formData.buy_price),
+        stop_loss_price: formData.stop_loss_price ? parseFloat(formData.stop_loss_price) : undefined,
+        take_profit_price: formData.take_profit_price ? parseFloat(formData.take_profit_price) : undefined,
+        open_time: utcTimeString
+      };
+
+      if (editingTrade) {
+        await axios.put(`/api/trades/${editingTrade.id}`, data);
+      } else {
+        await axios.post('/api/trades', data);
+      }
+
+      setShowForm(false);
+      setEditingTrade(null);
+      resetForm();
+      
+      // 刷新相关面板
+      refreshCalendar(); // 刷新日历标记
+      refreshPositions(); // 刷新持仓（如果有新持仓）
+      refreshAnalysis(); // 刷新AI分析
+      refreshUserPanel(); // 刷新用户面板（资金可能变化）
+      fetchTrades(); // 刷新当前列表
+    } catch (error: any) {
+      alert(error.response?.data?.detail || '操作失败');
+    }
+  };
+
+  const handleEdit = (trade: Trade) => {
+    setEditingTrade(trade);
+    // 将UTC时间转换为北京时间显示（datetime-local输入框需要北京时间格式）
+    const beijingTimeString = utcToBeijingTime(trade.open_time);
+    
+    setFormData({
+      stock_code: trade.stock_code,
+      stock_name: trade.stock_name || '',
+      open_time: beijingTimeString,
+      shares: trade.shares.toString(),
+      commission: trade.commission.toString(),
+      buy_commission: trade.buy_commission?.toString() || '',  // 买入手续费
+      sell_commission: trade.sell_commission?.toString() || '',  // 卖出手续费
+      buy_price: trade.buy_price.toString(),
+      stop_loss_price: trade.stop_loss_price?.toString() || '',
+      take_profit_price: trade.take_profit_price?.toString() || '',
+      stop_loss_alert: trade.stop_loss_alert,
+      take_profit_alert: trade.take_profit_alert,
+      notes: trade.notes || ''
+    });
+    setShowForm(true);
+  };
+
+  const handleClearAll = async () => {
+    const confirmMessage = `⚠️ 警告：确定要清空所有历史交易记录吗？
+
+此操作将：
+• 删除所有交易记录（软删除）
+• 重新计算资金曲线（恢复到初始资金）
+• 清除所有持仓记录
+
+此操作不可恢复！`;
+    
+    const firstConfirm = await confirm('⚠️ 清空所有交易记录', confirmMessage);
+    if (!firstConfirm) return;
+    
+    // 二次确认
+    const secondConfirmMessage = `⚠️ 最后确认：您真的要清空所有历史交易记录吗？
+
+清空后，总资产将恢复到初始资金状态。
+
+点击确定继续，或点击取消放弃。`;
+    const secondConfirm = await confirm('⚠️ 最终确认', secondConfirmMessage);
+    if (!secondConfirm) return;
+    
+    try {
+      logger.info('🗑️ [TradeHistory] 清空所有交易记录（后端一次性处理）...');
+      const res = await axios.delete('/api/trades/clear-all');
+
+      // 等待后端重算落库
+      await new Promise(resolve => setTimeout(resolve, 400));
+
+      alert(`✅ 已清空交易记录\n\n删除数量：${res.data?.deleted_count ?? 0}\n💡 总资产已恢复到初始资金状态`);
+
+      // 刷新相关面板
+      refreshCalendar();
+      refreshPositions();
+      refreshAnalysis();
+      refreshUserPanel();
+      fetchTrades();
+    } catch (error: any) {
+      logger.error('❌ [TradeHistory] 清空失败', error.response?.data || error.message);
+      alert(error.response?.data?.detail || '清空失败，请稍后重试');
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    // 找到要删除的交易记录
+    const tradeToDelete = trades.find(t => t.id === id);
+    if (!tradeToDelete) return;
+    
+    const hasAlerts = (tradeToDelete.stop_loss_alert && tradeToDelete.stop_loss_price) ||
+                      (tradeToDelete.take_profit_alert && tradeToDelete.take_profit_price);
+    
+    const confirmMessage = hasAlerts 
+      ? `确定要删除这条交易记录吗？
+
+⚠️ 注意：该交易已设置止损/止盈提醒，删除后将自动取消提醒。
+
+💡 删除后，资金曲线将重新计算（排除此交易）。`
+      : `确定要删除这条交易记录吗？
+
+💡 删除后，资金曲线将重新计算（排除此交易）。`;
+    
+    const userConfirm = await confirm(`🗑️ 删除交易 ${tradeToDelete.stock_code}`, confirmMessage);
+    if (!userConfirm) return;
+
+    try {
+      logger.info(`🗑️ [TradeHistory] 删除交易记录 ID: ${id}`);
+      await axios.delete(`/api/trades/${id}`);
+      logger.info(`✅ [TradeHistory] 交易记录已删除，等待后端重新计算资金曲线...`);
+      
+      // 清除与该交易相关的所有提醒（止损和止盈）
+      if (hasAlerts) {
+        clearAlertsByStockCode(tradeToDelete.stock_code);
+      }
+      
+      // 等待一小段时间确保后端已完成资金曲线重新计算
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // 刷新相关面板（这会自动清除已删除交易的提醒）
+      refreshCalendar(); // 刷新日历标记
+      refreshPositions(); // 刷新持仓（已删除的交易不会出现在持仓中，相关提醒也会消失）
+      refreshAnalysis(); // 刷新AI分析
+      refreshUserPanel(); // 刷新用户面板（重新获取资金数据）
+      fetchTrades(); // 刷新当前列表
+      
+      logger.info(`✅ [TradeHistory] 所有面板已刷新`);
+    } catch (error: any) {
+      logger.error('❌ [TradeHistory] 删除失败', error.response?.data || error.message);
+      alert('删除失败');
+    }
+  };
+
+  const resetForm = () => {
+    setFormData({
+      stock_code: '',
+      stock_name: '',
+      open_time: getSelectedDateBeijingTime(), // 使用选中日期的北京时间
+      shares: '',
+      commission: '0',
+      buy_commission: '',  // 买入手续费，留空自动计算
+      sell_commission: '',  // 卖出手续费，留空自动计算
+      buy_price: '',
+      stop_loss_price: '',
+      take_profit_price: '',
+      stop_loss_alert: false,
+      take_profit_alert: false,
+      notes: ''
+    });
+  };
+
+  const parseStockCode = (input: string) => {
+    const parts = input.split('-');
+    return {
+      code: parts[0].trim(),
+      name: parts[1]?.trim() || ''
+    };
+  };
+
+  if (loading) {
+    return (
+      <div className="jojo-card p-3 text-center">
+        <div className="text-jojo-gold animate-jojo-pulse text-sm">加载中...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="jojo-card p-3">
+      <div className="flex justify-between items-center mb-2">
+        <div className="flex items-center space-x-2">
+          <h2 className="jojo-title text-lg">开仓记录历史</h2>
+          {/* 查看模式切换按钮 */}
+          <div className="flex items-center space-x-1 bg-jojo-blue-light rounded p-0.5 border border-jojo-gold">
+            <button
+              onClick={() => setViewMode('date')}
+              className={`px-2 py-0.5 rounded text-xs flex items-center space-x-1 transition-all ${
+                viewMode === 'date'
+                  ? 'bg-jojo-gold text-jojo-blue font-bold'
+                  : 'text-gray-300 hover:text-white'
+              }`}
+            >
+              <Calendar size={12} />
+              <span>按日期</span>
+            </button>
+            <button
+              onClick={() => setViewMode('all')}
+              className={`px-2 py-0.5 rounded text-xs flex items-center space-x-1 transition-all ${
+                viewMode === 'all'
+                  ? 'bg-jojo-gold text-jojo-blue font-bold'
+                  : 'text-gray-300 hover:text-white'
+              }`}
+            >
+              <List size={12} />
+              <span>全部历史</span>
+            </button>
+          </div>
+        </div>
+        <div className="flex items-center space-x-1">
+          <button
+            onClick={() => {
+              resetForm();
+              setEditingTrade(null);
+              setShowForm(true);
+            }}
+            className="jojo-button flex items-center space-x-1 text-xs px-2 py-1"
+          >
+            <Plus size={14} />
+            <span>添加</span>
+          </button>
+          {viewMode === 'all' && trades.length > 0 && (
+            <button
+              onClick={handleClearAll}
+              className="jojo-button-danger flex items-center space-x-1 text-xs px-2 py-1"
+              title="清空所有历史交易记录"
+            >
+              <Trash size={14} />
+              <span>清空</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* 显示当前查看模式 */}
+      {viewMode === 'date' && (
+        <div className="mb-2 p-1 bg-jojo-blue-light rounded text-xs text-gray-300">
+          查看日期: {new Date(selectedDate).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })}
+        </div>
+      )}
+      {viewMode === 'all' && (
+        <div className="mb-2 p-1 bg-jojo-blue-light rounded text-xs text-jojo-gold">
+          📋 查看全部历史订单 ({trades.length} 条记录)
+        </div>
+      )}
+
+      {showForm && (
+        <form onSubmit={handleSubmit} className="mb-2 p-2 bg-jojo-blue-light rounded space-y-2 border border-jojo-gold text-xs">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-jojo-gold mb-1">
+                股票代码（格式：600879-航空电子）
+              </label>
+              <input
+                type="text"
+                value={formData.stock_code}
+                onChange={(e) => {
+                  const parsed = parseStockCode(e.target.value);
+                  setFormData({
+                    ...formData,
+                    stock_code: parsed.code,
+                    stock_name: parsed.name
+                  });
+                }}
+                className="jojo-input"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-jojo-gold mb-1">开仓时间</label>
+              <input
+                type="datetime-local"
+                value={formData.open_time}
+                onChange={(e) => setFormData({ ...formData, open_time: e.target.value })}
+                className="jojo-input"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-jojo-gold mb-1">手数</label>
+              <input
+                type="number"
+                value={formData.shares}
+                onChange={(e) => setFormData({ ...formData, shares: e.target.value })}
+                className="jojo-input"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-jojo-gold mb-1">入场价格</label>
+              <input
+                type="number"
+                step="0.01"
+                value={formData.buy_price}
+                onChange={(e) => setFormData({ ...formData, buy_price: e.target.value })}
+                className="jojo-input"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-jojo-gold mb-1">止损价格</label>
+              <input
+                type="number"
+                step="0.01"
+                value={formData.stop_loss_price}
+                onChange={(e) => setFormData({ ...formData, stop_loss_price: e.target.value })}
+                className="jojo-input"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-jojo-gold mb-1">止盈价格</label>
+              <input
+                type="number"
+                step="0.01"
+                value={formData.take_profit_price}
+                onChange={(e) => setFormData({ ...formData, take_profit_price: e.target.value })}
+                className="jojo-input"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-jojo-gold mb-1">买入手续费</label>
+              <input
+                type="number"
+                step="0.01"
+                value={formData.buy_commission || ''}
+                onChange={(e) => setFormData({ ...formData, buy_commission: e.target.value })}
+                className="jojo-input"
+                placeholder="留空自动计算"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-jojo-gold mb-1">卖出手续费</label>
+              <input
+                type="number"
+                step="0.01"
+                value={formData.sell_commission || ''}
+                onChange={(e) => setFormData({ ...formData, sell_commission: e.target.value })}
+                className="jojo-input"
+                placeholder="留空自动计算"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="flex items-center space-x-2 text-jojo-gold">
+                <input
+                  type="checkbox"
+                  checked={formData.stop_loss_alert}
+                  onChange={(e) => setFormData({ ...formData, stop_loss_alert: e.target.checked })}
+                  className="w-4 h-4"
+                />
+                <span className="text-sm">止损价格闹铃</span>
+              </label>
+              <label className="flex items-center space-x-2 text-jojo-gold">
+                <input
+                  type="checkbox"
+                  checked={formData.take_profit_alert}
+                  onChange={(e) => setFormData({ ...formData, take_profit_alert: e.target.checked })}
+                  className="w-4 h-4"
+                />
+                <span className="text-sm">止盈价格闹铃</span>
+              </label>
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-jojo-gold mb-1">交易备注</label>
+            <textarea
+              value={formData.notes}
+              onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+              className="jojo-input"
+              rows={3}
+            />
+          </div>
+          <div className="flex space-x-2">
+            <button
+              type="submit"
+              className="jojo-button"
+            >
+              {editingTrade ? '更新' : '创建'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowForm(false);
+                setEditingTrade(null);
+                resetForm();
+              }}
+              className="jojo-button-danger"
+            >
+              取消
+            </button>
+          </div>
+        </form>
+      )}
+
+      <div className="overflow-x-auto max-h-[500px] overflow-y-auto custom-scrollbar">
+        <table className="jojo-table text-xs">
+          <thead className="sticky top-0 bg-jojo-blue">
+            <tr>
+              <th className="py-1 px-2">代码</th>
+              {viewMode === 'all' && <th className="py-1 px-2">开仓时间</th>}
+              {viewMode === 'all' && <th className="py-1 px-2">离场时间</th>}
+              <th className="py-1 px-2">手数</th>
+              <th className="py-1 px-2">入场价格</th>
+              {viewMode === 'all' && <th className="py-1 px-2">离场价格</th>}
+              <th className="py-1 px-2">止损价格</th>
+              <th className="py-1 px-2">止盈价格</th>
+              <th className="py-1 px-2">理论风险比</th>
+              {viewMode === 'all' && <th className="py-1 px-2">实际风险比</th>}
+              <th className="py-1 px-2">买入手续费</th>
+              {viewMode === 'all' && <th className="py-1 px-2">卖出手续费</th>}
+              <th className="py-1 px-2">总手续费</th>
+              {viewMode === 'all' && <th className="py-1 px-2">订单结果</th>}
+              <th className="py-1 px-2">出场闹铃</th>
+              <th className="py-1 px-2">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {trades.length === 0 ? (
+              <tr>
+                <td colSpan={viewMode === 'all' ? 16 : 11} className="px-2 py-4 text-center text-gray-400">
+                  {viewMode === 'all' ? '暂无交易记录' : '该日期暂无交易记录'}
+                </td>
+              </tr>
+            ) : (
+              trades.map((trade) => (
+                <tr key={trade.id} className="hover:bg-jojo-blue-light">
+                  <td className="py-1 px-2">
+                    <div className="font-bold text-jojo-gold text-xs">
+                      {trade.stock_code}
+                      {trade.stock_name && <span className="text-white">-{trade.stock_name}</span>}
+                    </div>
+                  </td>
+                  {viewMode === 'all' && (
+                    <td className="py-1 px-2 text-xs">
+                      {new Date(trade.open_time).toLocaleString('zh-CN', {
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </td>
+                  )}
+                  {viewMode === 'all' && (
+                    <td className="py-1 px-2 text-xs">
+                      {trade.close_time ? (
+                        new Date(trade.close_time).toLocaleString('zh-CN', {
+                          year: 'numeric',
+                          month: '2-digit',
+                          day: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })
+                      ) : (
+                        <span className="text-gray-500">-</span>
+                      )}
+                    </td>
+                  )}
+                  <td className="py-1 px-2">{trade.shares}</td>
+                  <td className="py-1 px-2">¥{trade.buy_price.toFixed(2)}</td>
+                  {viewMode === 'all' && (
+                    <td className="py-1 px-2">
+                      {trade.sell_price ? (
+                        <span className={`font-semibold ${
+                          trade.sell_price > trade.buy_price ? 'text-green-400' :
+                          trade.sell_price < trade.buy_price ? 'text-red-400' :
+                          'text-gray-300'
+                        }`}>
+                          ¥{trade.sell_price.toFixed(2)}
+                        </span>
+                      ) : (
+                        <span className="text-gray-500">-</span>
+                      )}
+                    </td>
+                  )}
+                  <td className="py-1 px-2">{trade.stop_loss_price ? `¥${trade.stop_loss_price.toFixed(2)}` : '-'}</td>
+                  <td className="py-1 px-2">{trade.take_profit_price ? `¥${trade.take_profit_price.toFixed(2)}` : '-'}</td>
+                  <td className="py-1 px-2">
+                    {trade.theoretical_risk_reward_ratio !== null && trade.theoretical_risk_reward_ratio !== undefined && !isNaN(trade.theoretical_risk_reward_ratio) ? (
+                      <span className={`font-semibold ${
+                        trade.theoretical_risk_reward_ratio >= 2 ? 'text-green-400' :
+                        trade.theoretical_risk_reward_ratio >= 1 ? 'text-yellow-400' :
+                        'text-red-400'
+                      }`}>
+                        {trade.theoretical_risk_reward_ratio.toFixed(2)}:1
+                      </span>
+                    ) : (
+                      <span className="text-gray-500">-</span>
+                    )}
+                  </td>
+                  {viewMode === 'all' && (
+                    <td className="py-1 px-2">
+                      {trade.actual_risk_reward_ratio !== null && trade.actual_risk_reward_ratio !== undefined && !isNaN(trade.actual_risk_reward_ratio) ? (
+                        <span className={`font-semibold ${
+                          trade.actual_risk_reward_ratio >= 2 ? 'text-green-400' :
+                          trade.actual_risk_reward_ratio >= 1 ? 'text-yellow-400' :
+                          'text-red-400'
+                        }`}>
+                          {trade.actual_risk_reward_ratio.toFixed(2)}:1
+                        </span>
+                      ) : (
+                        <span className="text-gray-500">-</span>
+                      )}
+                    </td>
+                  )}
+                  <td className="py-1 px-2 text-green-300">
+                    ¥{(trade.buy_commission !== undefined && trade.buy_commission !== null ? trade.buy_commission : trade.commission).toFixed(2)}
+                  </td>
+                  {viewMode === 'all' && (
+                    <td className="py-1 px-2 text-red-300">
+                      {trade.sell_commission !== undefined && trade.sell_commission !== null && trade.sell_commission > 0 ? (
+                        `¥${trade.sell_commission.toFixed(2)}`
+                      ) : (
+                        <span className="text-gray-500">-</span>
+                      )}
+                    </td>
+                  )}
+                  <td className="py-1 px-2 text-yellow-300 font-semibold">¥{trade.commission.toFixed(2)}</td>
+                  {viewMode === 'all' && (
+                    <td className="py-1 px-2">
+                      <span className={`inline-block min-w-[48px] text-center px-1 py-0.5 rounded text-xs ${
+                        trade.order_result === '止盈' ? 'bg-green-500/20 text-green-400' :
+                        trade.order_result === '止损' ? 'bg-red-500/20 text-red-400' :
+                        trade.status === 'open' ? 'bg-blue-500/20 text-blue-400' :
+                        'bg-gray-500/20 text-gray-400'
+                      }`}>
+                        {trade.order_result || (trade.status === 'open' ? '持仓中' : '已平仓')}
+                      </span>
+                    </td>
+                  )}
+                  <td className="py-1 px-2">
+                    {/* 只有持仓中才显示出场闹铃，已平仓不显示 */}
+                    {trade.status === 'open' ? (
+                      <div className="flex space-x-1">
+                        {trade.stop_loss_alert && (
+                          <span className="px-1 py-0.5 bg-red-500/20 text-red-400 rounded text-xs">止损</span>
+                        )}
+                        {trade.take_profit_alert && (
+                          <span className="px-1 py-0.5 bg-green-500/20 text-green-400 rounded text-xs">止盈</span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-gray-500 text-xs">-</span>
+                    )}
+                  </td>
+                  <td className="py-1 px-2 min-w-[72px]">
+                    {/* 竖排避免在窄屏/被裁剪时看不到“删除”按钮 */}
+                    <div className="flex flex-col items-center gap-1">
+                      <button
+                        onClick={() => handleEdit(trade)}
+                        className="px-2 py-1 rounded hover:bg-jojo-gold/20 text-jojo-gold hover:text-jojo-gold-dark transition-all flex items-center gap-1 text-xs"
+                        title="编辑交易"
+                      >
+                        <Edit size={14} />
+                        <span>编辑</span>
+                      </button>
+                      <button
+                        onClick={() => handleDelete(trade.id)}
+                        className="px-2 py-1 rounded hover:bg-red-500/20 text-red-400 hover:text-red-300 transition-all flex items-center gap-1 text-xs"
+                        title="删除交易（资金将重新计算）"
+                      >
+                        <Trash2 size={14} />
+                        <span>删除</span>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+      
+      {/* JOJO风格弹窗 */}
+      <Modal />
+    </div>
+  );
+}
