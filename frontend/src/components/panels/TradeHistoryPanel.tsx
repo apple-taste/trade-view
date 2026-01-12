@@ -80,6 +80,12 @@ interface TradeHistoryPanelProps {
   selectedDate: string;
 }
 
+interface StockStatistics {
+  total_profit_loss: number;
+  average_theoretical_risk_reward_ratio: number | null;
+  trade_count: number;
+}
+
 export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelProps) {
   const { confirm, Modal } = useJojoModal();
   const [trades, setTrades] = useState<Trade[]>([]);
@@ -87,6 +93,9 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
   const [showForm, setShowForm] = useState(false);
   const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
   const [viewMode, setViewMode] = useState<'date' | 'all'>('date');
+  const [stockCodes, setStockCodes] = useState<string[]>([]);
+  const [selectedStockCode, setSelectedStockCode] = useState<string | null>(null);
+  const [stockStatistics, setStockStatistics] = useState<StockStatistics | null>(null);
   const { refreshCalendar, refreshPositions, refreshAnalysis, refreshUserPanel, _tradeHistoryRefreshKey } = useTrade();
   const { clearAlertsByStockCode } = useAlerts();
   // 将选中日期转换为北京时间格式（用于datetime-local输入框）
@@ -148,7 +157,45 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
 
   useEffect(() => {
     fetchTrades();
+    if (viewMode === 'all') {
+      fetchStockCodes();
+    } else {
+      setSelectedStockCode(null);
+      setStockStatistics(null);
+    }
   }, [selectedDate, viewMode, _tradeHistoryRefreshKey]);
+
+  useEffect(() => {
+    if (viewMode === 'all' && selectedStockCode) {
+      fetchTradesByStockCode(selectedStockCode);
+    } else if (viewMode === 'all' && !selectedStockCode) {
+      fetchTrades();
+    }
+  }, [selectedStockCode, viewMode]);
+
+  const fetchStockCodes = async () => {
+    try {
+      const response = await axios.get('/api/trades/stock-codes');
+      setStockCodes(response.data);
+    } catch (error) {
+      console.error('获取股票代码列表失败:', error);
+    }
+  };
+
+  const fetchTradesByStockCode = async (stockCode: string) => {
+    setLoading(true);
+    try {
+      const response = await axios.get(`/api/trades/stock/${stockCode}`);
+      setTrades(response.data.trades);
+      setStockStatistics(response.data.statistics);
+    } catch (error) {
+      console.error('获取股票交易记录失败:', error);
+      setTrades([]);
+      setStockStatistics(null);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const fetchTrades = async () => {
     setLoading(true);
@@ -156,9 +203,11 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       if (viewMode === 'all') {
         const response = await axios.get('/api/trades');
         setTrades(response.data);
+        setStockStatistics(null);
       } else {
         const response = await axios.get(`/api/trades/date/${selectedDate}`);
         setTrades(response.data);
+        setStockStatistics(null);
       }
     } catch (error) {
       console.error('获取交易记录失败:', error);
@@ -431,8 +480,79 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
         </div>
       )}
       {viewMode === 'all' && (
-        <div className="mb-2 p-1 bg-jojo-blue-light rounded text-xs text-jojo-gold">
-          📋 查看全部历史订单 ({trades.length} 条记录)
+        <div className="mb-2 space-y-2">
+          <div className="p-1 bg-jojo-blue-light rounded text-xs text-jojo-gold">
+            📋 查看全部历史订单 {selectedStockCode ? `- ${selectedStockCode}` : ''} ({trades.length} 条记录)
+          </div>
+          
+          {/* 股票代码筛选器 */}
+          {stockCodes.length > 0 && (
+            <div className="p-2 bg-jojo-blue-light rounded border border-jojo-gold">
+              <div className="text-xs text-jojo-gold mb-2 font-semibold">📊 按股票代码筛选：</div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => {
+                    setSelectedStockCode(null);
+                    setStockStatistics(null);
+                  }}
+                  className={`px-3 py-1 rounded text-xs font-medium transition-all ${
+                    selectedStockCode === null
+                      ? 'bg-jojo-gold text-gray-900 shadow-lg'
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
+                >
+                  全部 ({stockCodes.length})
+                </button>
+                {stockCodes.map((code) => (
+                  <button
+                    key={code}
+                    onClick={() => setSelectedStockCode(code)}
+                    className={`px-3 py-1 rounded text-xs font-medium transition-all ${
+                      selectedStockCode === code
+                        ? 'bg-jojo-gold text-gray-900 shadow-lg'
+                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
+                  >
+                    {code}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          
+          {/* 选中股票的统计信息 */}
+          {selectedStockCode && stockStatistics && (
+            <div className="p-3 bg-gradient-to-r from-jojo-blue-light to-jojo-blue-dark rounded border-2 border-jojo-gold">
+              <div className="text-sm font-bold text-jojo-gold mb-2">
+                📈 {selectedStockCode} 交易统计
+              </div>
+              <div className="grid grid-cols-3 gap-3 text-xs">
+                <div className="bg-gray-800/50 p-2 rounded">
+                  <div className="text-gray-400 mb-1">交易次数</div>
+                  <div className="text-lg font-bold text-white">{stockStatistics.trade_count}</div>
+                </div>
+                <div className={`bg-gray-800/50 p-2 rounded ${
+                  stockStatistics.total_profit_loss >= 0 ? 'border-2 border-green-500' : 'border-2 border-red-500'
+                }`}>
+                  <div className="text-gray-400 mb-1">合计盈亏</div>
+                  <div className={`text-lg font-bold ${
+                    stockStatistics.total_profit_loss >= 0 ? 'text-green-400' : 'text-red-400'
+                  }`}>
+                    {stockStatistics.total_profit_loss >= 0 ? '+' : ''}
+                    {stockStatistics.total_profit_loss.toFixed(2)} 元
+                  </div>
+                </div>
+                <div className="bg-gray-800/50 p-2 rounded">
+                  <div className="text-gray-400 mb-1">平均理论风险回报比</div>
+                  <div className="text-lg font-bold text-white">
+                    {stockStatistics.average_theoretical_risk_reward_ratio !== null
+                      ? stockStatistics.average_theoretical_risk_reward_ratio.toFixed(2)
+                      : 'N/A'}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

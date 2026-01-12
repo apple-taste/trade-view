@@ -543,3 +543,135 @@ async def get_trade_dates(
         logger = logging.getLogger(__name__)
         logger.error(f"获取交易日期失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取交易日期失败: {str(e)}")
+
+@router.get(
+    "/stock-codes",
+    response_model=list[str],
+    summary="获取所有股票代码列表",
+    description="""
+    获取当前用户所有交易记录中的唯一股票代码列表。
+    
+    返回格式：["600879", "002426", ...]
+    用于在历史订单面板中按股票代码筛选。
+    """,
+    responses={
+        200: {"description": "成功返回股票代码列表"}
+    }
+)
+async def get_stock_codes(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        result = await db.execute(
+            select(distinct(Trade.stock_code))
+            .where(
+                Trade.user_id == current_user.id,
+                Trade.is_deleted == False
+            )
+            .order_by(Trade.stock_code.asc())
+        )
+        stock_codes = result.scalars().all()
+        return [code for code in stock_codes if code]  # 过滤空值
+    except Exception as e:
+        logger.error(f"获取股票代码列表失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取股票代码列表失败: {str(e)}")
+
+@router.get(
+    "/stock/{stock_code}",
+    response_model=dict,
+    summary="按股票代码获取交易记录和统计信息",
+    description="""
+    获取指定股票代码的所有交易记录和统计信息。
+    
+    - **stock_code**: 股票代码（如：600879）
+    
+    返回格式：
+    {
+        "trades": [...],  // 该股票的所有交易记录
+        "statistics": {
+            "total_profit_loss": 1234.56,  // 合计盈亏
+            "average_theoretical_risk_reward_ratio": 2.5,  // 平均理论风险回报比
+            "trade_count": 5  // 交易次数
+        }
+    }
+    """,
+    responses={
+        200: {"description": "成功返回交易记录和统计信息"},
+        404: {"description": "未找到该股票的交易记录"}
+    }
+)
+async def get_trades_by_stock_code(
+    stock_code: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        # 获取该股票的所有交易记录
+        result = await db.execute(
+            select(Trade)
+            .where(
+                Trade.user_id == current_user.id,
+                Trade.stock_code == stock_code,
+                Trade.is_deleted == False
+            )
+            .order_by(Trade.open_time.desc())
+        )
+        trades = result.scalars().all()
+        
+        if not trades:
+            raise HTTPException(status_code=404, detail=f"未找到股票代码 {stock_code} 的交易记录")
+        
+        # 计算风险回报比并构建响应
+        trade_responses = []
+        total_profit_loss = 0.0
+        theoretical_risk_reward_ratios = []
+        
+        for trade in trades:
+            trade_dict = trade.__dict__.copy()
+            
+            # 计算风险回报比
+            if trade.buy_price and trade.stop_loss_price and trade.take_profit_price:
+                risk = trade.buy_price - trade.stop_loss_price
+                reward = trade.take_profit_price - trade.buy_price
+                if risk > 0:
+                    ratio = round(reward / risk, 2)
+                    trade_dict['risk_reward_ratio'] = ratio
+                    theoretical_risk_reward_ratios.append(ratio)
+                else:
+                    trade_dict['risk_reward_ratio'] = None
+            else:
+                trade_dict['risk_reward_ratio'] = None
+            
+            # 累计盈亏（如果有profit_loss字段）
+            if hasattr(trade, 'profit_loss') and trade.profit_loss is not None:
+                total_profit_loss += trade.profit_loss
+            elif trade.sell_price and trade.buy_price:
+                # 手动计算盈亏：(卖出价 - 买入价) * 手数 - 手续费
+                profit = (trade.sell_price - trade.buy_price) * trade.shares
+                commission = trade.commission or 0
+                total_profit_loss += (profit - commission)
+            
+            trade_responses.append(TradeResponse(**trade_dict))
+        
+        # 计算平均理论风险回报比
+        avg_theoretical_risk_reward_ratio = None
+        if theoretical_risk_reward_ratios:
+            avg_theoretical_risk_reward_ratio = round(
+                sum(theoretical_risk_reward_ratios) / len(theoretical_risk_reward_ratios),
+                2
+            )
+        
+        return {
+            "trades": trade_responses,
+            "statistics": {
+                "total_profit_loss": round(total_profit_loss, 2),
+                "average_theoretical_risk_reward_ratio": avg_theoretical_risk_reward_ratio,
+                "trade_count": len(trades)
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取股票 {stock_code} 的交易记录失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取交易记录失败: {str(e)}")
