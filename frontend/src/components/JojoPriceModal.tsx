@@ -61,7 +61,7 @@ export default function JojoPriceModal({
   };
 
   const isTakeProfit = type === 'take_profit';
-  const themeColor = isTakeProfit ? 'green' : 'red';
+  // const themeColor = isTakeProfit ? 'green' : 'red';  // 未使用，注释掉避免lint错误
   const emoji = isTakeProfit ? '🎉' : '⚠️';
   const title = isTakeProfit ? '止盈订单' : '止损订单';
   const Icon = isTakeProfit ? TrendingUp : TrendingDown;
@@ -258,7 +258,7 @@ export function useJojoPriceModal() {
     currentPrice?: number;
     targetPrice?: number;
     defaultValue?: string;
-    resolve?: (value: string | null) => void;
+    resolve?: (value: { price: string; date?: string } | null) => void;
   }>({
     isOpen: false,
     type: 'take_profit',

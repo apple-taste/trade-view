@@ -30,7 +30,7 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
   const { user } = useAuth();
   const { confirm, Modal } = useJojoModal();
   const { openModal: openCapitalModal, Modal: CapitalModal } = useJojoCapitalModal();
-  const [capital, setCapital] = useState<number>(0);
+  // const [capital, setCapital] = useState<number>(0);  // 未使用，注释掉避免lint错误
   const [capitalInfo, setCapitalInfo] = useState<CapitalInfo>({
     capital: 0,
     total_assets: 0,
@@ -69,7 +69,7 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
         position_value: capitalRes.data.position_value,
         historyCount: historyRes.data.length
       });
-      setCapital(capitalRes.data.capital);
+      // setCapital(capitalRes.data.capital);  // capital state已注释，不再需要
       setCapitalInfo({
         capital: capitalRes.data.capital,
         total_assets: capitalRes.data.total_assets || capitalRes.data.capital,
@@ -123,7 +123,7 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
       }
       
       const { capital: capitalStr, date: dateStr } = result;
-      logger.info('📝 [UserPanel] 用户输入 - 资金:', capitalStr, '日期:', dateStr);
+      logger.info(`📝 [UserPanel] 用户输入 - 资金: ${capitalStr}, 日期: ${dateStr}`);
       
       if (!capitalStr || isNaN(parseFloat(capitalStr))) {
         await confirm('❌ 输入无效', '请输入有效的资金金额');
@@ -136,7 +136,7 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
       if (dateStr && dateStr.trim() !== '') {
         // 简单的日期格式验证
         if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr.trim())) {
-          await confirm('❌ 格式错误', '日期格式不正确，请使用 YYYY-MM-DD 格式。');
+          await confirm('❌ 格式错误', '日期格式不正确，请使用 YYYY-MM-DD 格式');
           return;
         }
         updateDate = dateStr.trim();

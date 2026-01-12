@@ -263,7 +263,7 @@ export function useJojoCapitalModal() {
   const [isOpen, setIsOpen] = useState(false);
   const [resolve, setResolve] = useState<((value: { capital: string; date: string } | null) => void) | null>(null);
 
-  const openModal = (defaultCapital = '', defaultDate = new Date().toISOString().split('T')[0]): Promise<{ capital: string; date: string } | null> => {
+  const openModal = (_defaultCapital = '', _defaultDate = new Date().toISOString().split('T')[0]): Promise<{ capital: string; date: string } | null> => {
     return new Promise((res) => {
       setResolve(() => res);
       setIsOpen(true);

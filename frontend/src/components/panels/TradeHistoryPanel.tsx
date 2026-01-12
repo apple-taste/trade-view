@@ -86,7 +86,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
   const [showForm, setShowForm] = useState(false);
   const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
   const [viewMode, setViewMode] = useState<'date' | 'all'>('date');
-  const { refreshCalendar, refreshPositions, refreshAnalysis, refreshUserPanel, refreshTradeHistory, _tradeHistoryRefreshKey } = useTrade();
+  const { refreshCalendar, refreshPositions, refreshAnalysis, refreshUserPanel, _tradeHistoryRefreshKey } = useTrade();
   const { clearAlertsByStockCode } = useAlerts();
   // 将选中日期转换为北京时间格式（用于datetime-local输入框）
   const getSelectedDateBeijingTime = (): string => {

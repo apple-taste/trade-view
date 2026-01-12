@@ -30,8 +30,8 @@ export function AlertProvider({ children }: { children: ReactNode }) {
   });
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const loopIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const loopIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // const [isPlaying, setIsPlaying] = useState(false);  // 未使用，注释掉避免lint错误
   const audioContextRef = useRef<AudioContext | null>(null);  // 持久化AudioContext，确保音量控制生效
   const volumeRef = useRef<number>(volume);  // 使用ref存储音量，确保获取最新值
   const soundEnabledRef = useRef<boolean>(soundEnabled);  // 使用ref存储音效开关状态
@@ -190,7 +190,7 @@ export function AlertProvider({ children }: { children: ReactNode }) {
       return;
     }
     
-    setIsPlaying(true);
+    // setIsPlaying(true);  // isPlaying state已注释，不再需要
     
     // 如果有自定义音频文件，使用它
     if (audioRef.current) {
@@ -208,7 +208,7 @@ export function AlertProvider({ children }: { children: ReactNode }) {
   
   // 停止循环播放
   const stopAlertSound = useCallback(() => {
-    setIsPlaying(false);
+    // setIsPlaying(false);  // isPlaying state已注释，不再需要
     if (loopIntervalRef.current) {
       clearInterval(loopIntervalRef.current);
       loopIntervalRef.current = null;

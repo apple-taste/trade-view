@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Bell, X, TrendingUp, TrendingDown, Volume2, VolumeX } from 'lucide-react';
 import { useAlerts } from '../../contexts/AlertContext';
 
