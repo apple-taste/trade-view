@@ -73,6 +73,7 @@ interface Trade {
   status?: string;
   price_source?: string;
   risk_reward_ratio?: number; // 风险回报比
+  profit_loss?: number;  // 盈亏金额（包含手续费）
 }
 
 interface TradeHistoryPanelProps {
@@ -559,6 +560,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
               {viewMode === 'all' && <th className="py-1 px-2">卖出手续费</th>}
               <th className="py-1 px-2">总手续费</th>
               {viewMode === 'all' && <th className="py-1 px-2">订单结果</th>}
+              {viewMode === 'all' && <th className="py-1 px-2">盈亏</th>}
               <th className="py-1 px-2">出场闹铃</th>
               <th className="py-1 px-2">操作</th>
             </tr>
@@ -566,7 +568,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
           <tbody>
             {trades.length === 0 ? (
               <tr>
-                <td colSpan={viewMode === 'all' ? 16 : 11} className="px-2 py-4 text-center text-gray-400">
+                <td colSpan={viewMode === 'all' ? 17 : 11} className="px-2 py-4 text-center text-gray-400">
                   {viewMode === 'all' ? '暂无交易记录' : '该日期暂无交易记录'}
                 </td>
               </tr>
@@ -675,6 +677,21 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
                       }`}>
                         {trade.order_result || (trade.status === 'open' ? '持仓中' : '已平仓')}
                       </span>
+                    </td>
+                  )}
+                  {viewMode === 'all' && (
+                    <td className="py-1 px-2">
+                      {trade.profit_loss !== undefined && trade.profit_loss !== null ? (
+                        <span className={`font-bold ${
+                          trade.profit_loss > 0 ? 'text-green-400' :
+                          trade.profit_loss < 0 ? 'text-red-400' :
+                          'text-gray-400'
+                        }`}>
+                          {trade.profit_loss > 0 ? '+' : ''}¥{trade.profit_loss.toFixed(2)}
+                        </span>
+                      ) : (
+                        <span className="text-gray-500 text-xs">-</span>
+                      )}
                     </td>
                   )}
                   <td className="py-1 px-2">
