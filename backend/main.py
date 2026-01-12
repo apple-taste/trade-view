@@ -84,23 +84,23 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ [数据库] 数据库初始化失败: {e}", exc_info=True)
         raise
     
-    # 启动价格监控服务
+    # 启动价格监控服务（非关键服务，失败不阻止启动）
     logger.info("📊 [价格监控] 正在启动价格监控服务...")
     try:
         await price_monitor.start()
         logger.info("✅ [价格监控] 价格监控服务已启动")
     except Exception as e:
         logger.error(f"❌ [价格监控] 价格监控服务启动失败: {e}", exc_info=True)
-        raise
+        logger.warning("⚠️  [价格监控] 价格监控服务启动失败，但应用将继续运行")
     
-    # 启动闹铃监控服务
+    # 启动闹铃监控服务（非关键服务，失败不阻止启动）
     logger.info("🔔 [闹铃监控] 正在启动闹铃监控服务...")
     try:
         await alert_monitor.start()
         logger.info("✅ [闹铃监控] 闹铃监控服务已启动")
     except Exception as e:
         logger.error(f"❌ [闹铃监控] 闹铃监控服务启动失败: {e}", exc_info=True)
-        raise
+        logger.warning("⚠️  [闹铃监控] 闹铃监控服务启动失败，但应用将继续运行")
     
     # 检查AI配置
     logger.info("🤖 [AI配置] 正在检查AI配置...")
