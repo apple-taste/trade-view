@@ -58,7 +58,7 @@ class TradeCreate(BaseModel):
     stock_code: str = "股票代码，如：600879"
     stock_name: Optional[str] = None
     open_time: Optional[datetime] = None
-    shares: int = "买入股数"
+    shares: Optional[int] = None  # 买入股数（可选，如果提供了单笔风险会自动计算）
     commission: Optional[float] = 0  # 总手续费（可选，系统会自动计算）
     buy_commission: Optional[float] = None  # 买入手续费（可选，系统会自动计算）
     buy_price: float = "实际买入价格"
@@ -67,6 +67,7 @@ class TradeCreate(BaseModel):
     stop_loss_alert: Optional[bool] = False
     take_profit_alert: Optional[bool] = False
     notes: Optional[str] = None
+    risk_per_trade: Optional[float] = None  # 单笔风险金额（可选，用于自动计算手数）
 
     class Config:
         json_schema_extra = {

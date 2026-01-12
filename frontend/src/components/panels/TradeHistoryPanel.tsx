@@ -109,6 +109,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
     stock_name: '',
     open_time: getSelectedDateBeijingTime(), // 使用选中日期的北京时间
     shares: '',
+    risk_per_trade: '',  // 单笔风险（用于自动计算手数）
     commission: '0',
     buy_commission: '',  // 买入手续费，留空自动计算
     sell_commission: '',  // 卖出手续费，留空自动计算
@@ -119,6 +120,31 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
     take_profit_alert: false,
     notes: ''
   });
+  
+  // 跟踪用户是否手动修改了手数（如果手动修改，不再自动计算）
+  const [sharesManuallySet, setSharesManuallySet] = useState(false);
+  
+  // 自动计算手数：当单笔风险、买入价格和止损价格都填写时
+  useEffect(() => {
+    if (!sharesManuallySet && formData.risk_per_trade && formData.buy_price && formData.stop_loss_price) {
+      const riskPerTrade = parseFloat(formData.risk_per_trade);
+      const buyPrice = parseFloat(formData.buy_price);
+      const stopLossPrice = parseFloat(formData.stop_loss_price);
+      
+      if (!isNaN(riskPerTrade) && !isNaN(buyPrice) && !isNaN(stopLossPrice) && 
+          riskPerTrade > 0 && buyPrice > stopLossPrice) {
+        // 计算每股风险
+        const riskPerShare = buyPrice - stopLossPrice;
+        // 计算手数：单笔风险 / 每股风险，向上取整
+        const calculatedShares = Math.ceil(riskPerTrade / riskPerShare);
+        
+        if (calculatedShares > 0) {
+          setFormData(prev => ({ ...prev, shares: calculatedShares.toString() }));
+          logger.info(`💰 [单笔风险] 自动计算手数: ${calculatedShares} (单笔风险: ${riskPerTrade}, 每股风险: ${riskPerShare.toFixed(2)})`);
+        }
+      }
+    }
+  }, [formData.risk_per_trade, formData.buy_price, formData.stop_loss_price, sharesManuallySet]);
 
   useEffect(() => {
     fetchTrades();
@@ -147,9 +173,10 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       // 将北京时间转换为UTC时间发送给后端
       const utcTimeString = beijingTimeToUTC(formData.open_time);
       
-      const data = {
+      const data: any = {
         ...formData,
-        shares: parseInt(formData.shares),
+        shares: formData.shares ? parseInt(formData.shares) : undefined,  // 如果提供了手数，使用手数
+        risk_per_trade: formData.risk_per_trade ? parseFloat(formData.risk_per_trade) : undefined,  // 单笔风险（可选）
         commission: parseFloat(formData.commission),
         buy_commission: formData.buy_commission ? parseFloat(formData.buy_commission) : undefined,  // 买入手续费（留空自动计算）
         sell_commission: formData.sell_commission ? parseFloat(formData.sell_commission) : undefined,  // 卖出手续费（留空自动计算）
@@ -158,6 +185,15 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
         take_profit_price: formData.take_profit_price ? parseFloat(formData.take_profit_price) : undefined,
         open_time: utcTimeString
       };
+      
+      // 如果用户提供了手数，优先使用手数；否则使用单笔风险
+      if (!data.shares && data.risk_per_trade) {
+        // 后端会根据单笔风险自动计算手数
+        delete data.shares;
+      } else if (data.shares) {
+        // 如果用户提供了手数，不使用单笔风险
+        delete data.risk_per_trade;
+      }
 
       if (editingTrade) {
         await axios.put(`/api/trades/${editingTrade.id}`, data);
@@ -190,6 +226,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       stock_name: trade.stock_name || '',
       open_time: beijingTimeString,
       shares: trade.shares.toString(),
+      risk_per_trade: '',  // 编辑时不使用单笔风险
       commission: trade.commission.toString(),
       buy_commission: trade.buy_commission?.toString() || '',  // 买入手续费
       sell_commission: trade.sell_commission?.toString() || '',  // 卖出手续费
@@ -200,6 +237,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       take_profit_alert: trade.take_profit_alert,
       notes: trade.notes || ''
     });
+    setSharesManuallySet(true);  // 编辑时手数已设置，不自动计算
     setShowForm(true);
   };
 
@@ -300,6 +338,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       stock_name: '',
       open_time: getSelectedDateBeijingTime(), // 使用选中日期的北京时间
       shares: '',
+      risk_per_trade: '',  // 单笔风险
       commission: '0',
       buy_commission: '',  // 买入手续费，留空自动计算
       sell_commission: '',  // 卖出手续费，留空自动计算
@@ -310,6 +349,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       take_profit_alert: false,
       notes: ''
     });
+    setSharesManuallySet(false);
   };
 
   const parseStockCode = (input: string) => {
@@ -399,6 +439,14 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       {showForm && (
         <form onSubmit={handleSubmit} className="mb-2 p-2 bg-jojo-blue-light rounded space-y-2 border border-jojo-gold text-xs">
           <div className="grid grid-cols-2 gap-4">
+            {/* 提示信息 */}
+            {formData.risk_per_trade && formData.buy_price && formData.stop_loss_price && !sharesManuallySet && (
+              <div className="col-span-2 p-2 bg-green-500/20 border border-green-500/50 rounded text-xs text-green-300">
+                💡 <strong>自动计算手数模式</strong>：已根据单笔风险 {formData.risk_per_trade} 元自动计算手数为 {formData.shares || '计算中...'} 股
+                <br />
+                <span className="text-gray-400">如需手动设置手数，请直接在手数字段输入，系统将停止自动计算</span>
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-jojo-gold mb-1">
                 股票代码（格式：600879-航空电子）
@@ -428,14 +476,45 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-jojo-gold mb-1">手数</label>
+              <label className="block text-sm font-medium text-jojo-gold mb-1">
+                手数
+                {formData.risk_per_trade && formData.buy_price && formData.stop_loss_price && (
+                  <span className="text-xs text-green-400 ml-1">(自动计算)</span>
+                )}
+              </label>
               <input
                 type="number"
                 value={formData.shares}
-                onChange={(e) => setFormData({ ...formData, shares: e.target.value })}
+                onChange={(e) => {
+                  setFormData({ ...formData, shares: e.target.value });
+                  setSharesManuallySet(true);  // 标记为手动设置
+                }}
                 className="jojo-input"
-                required
+                placeholder={formData.risk_per_trade ? "自动计算" : "必填"}
+                required={!formData.risk_per_trade}
               />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-jojo-gold mb-1">
+                单笔风险（元）
+                <span className="text-xs text-gray-400 ml-1">可选，用于自动计算手数</span>
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                value={formData.risk_per_trade}
+                onChange={(e) => {
+                  setFormData({ ...formData, risk_per_trade: e.target.value });
+                  setSharesManuallySet(false);  // 重置手动设置标志，允许自动计算
+                }}
+                className="jojo-input"
+                placeholder="例如：500（表示单笔最多亏损500元）"
+              />
+              {formData.risk_per_trade && formData.buy_price && formData.stop_loss_price && (
+                <div className="text-xs text-green-400 mt-1">
+                  💡 手数 = {formData.risk_per_trade} / ({formData.buy_price} - {formData.stop_loss_price}) = {formData.shares || '计算中...'}
+                </div>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-jojo-gold mb-1">入场价格</label>
@@ -443,7 +522,10 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
                 type="number"
                 step="0.01"
                 value={formData.buy_price}
-                onChange={(e) => setFormData({ ...formData, buy_price: e.target.value })}
+                onChange={(e) => {
+                  setFormData({ ...formData, buy_price: e.target.value });
+                  setSharesManuallySet(false);  // 重置手动设置标志，允许自动计算
+                }}
                 className="jojo-input"
                 required
               />
@@ -454,7 +536,10 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
                 type="number"
                 step="0.01"
                 value={formData.stop_loss_price}
-                onChange={(e) => setFormData({ ...formData, stop_loss_price: e.target.value })}
+                onChange={(e) => {
+                  setFormData({ ...formData, stop_loss_price: e.target.value });
+                  setSharesManuallySet(false);  // 重置手动设置标志，允许自动计算
+                }}
                 className="jojo-input"
               />
             </div>

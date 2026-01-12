@@ -180,12 +180,41 @@ async def create_trade(
     logger.info(f"   北京时间: {beijing_time_for_log}")
     logger.info(f"   北京时间日期: {beijing_time_for_log.date()}")
     
+    # 处理手数：如果提供了单笔风险和止损价格，自动计算手数
+    shares = trade_data.shares
+    if shares is None or shares == 0:
+        # 如果用户没有提供手数，尝试根据单笔风险计算
+        if trade_data.risk_per_trade and trade_data.risk_per_trade > 0:
+            if trade_data.stop_loss_price and trade_data.stop_loss_price < trade_data.buy_price:
+                # 计算每股风险
+                risk_per_share = trade_data.buy_price - trade_data.stop_loss_price
+                if risk_per_share > 0:
+                    # 计算手数：单笔风险 / 每股风险，向上取整
+                    calculated_shares = trade_data.risk_per_trade / risk_per_share
+                    shares = int(calculated_shares) + (1 if calculated_shares % 1 > 0 else 0)  # 向上取整
+                    logger.info(f"   💰 [单笔风险] 单笔风险: {trade_data.risk_per_trade}, 每股风险: {risk_per_share:.2f}, 计算手数: {shares}")
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="止损价格必须小于买入价格"
+                    )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="使用单笔风险计算手数时，必须提供止损价格且止损价格必须小于买入价格"
+                )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="必须提供手数(shares)或单笔风险(risk_per_trade)"
+            )
+    
     # 如果用户没有提供买入手续费，自动计算
     buy_commission = trade_data.buy_commission
     if buy_commission is None or buy_commission == 0:
         buy_commission = default_calculator.calculate_buy_commission(
             trade_data.buy_price,
-            trade_data.shares
+            shares
         )
     
     # commission字段保持兼容性（开仓时等于买入手续费）
@@ -204,7 +233,7 @@ async def create_trade(
         stock_code=trade_data.stock_code,
         stock_name=trade_data.stock_name,
         open_time=open_time,
-        shares=trade_data.shares,
+        shares=shares,
         commission=commission,
         buy_commission=buy_commission,
         sell_commission=0,  # 开仓时卖出手续费为0
