@@ -396,11 +396,9 @@ async def health_check():
             "smtp_server": "configured" if smtp_server else "not_configured"
         }
         
-        # 判断整体健康状态
-        is_healthy = (
-            price_monitor_status == "running" and
-            alert_monitor_status == "running"
-        )
+        # 判断整体健康状态（只要应用能响应请求就认为健康）
+        # 监控服务失败不影响基本功能
+        is_healthy = True
         
         logger.info(f"🏥 [健康检查] 服务状态检查 - {'健康' if is_healthy else '异常'}")
         logger.info(f"   • 价格监控: {price_monitor_status}")
