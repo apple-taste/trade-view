@@ -4,8 +4,10 @@ FROM node:20-alpine AS frontend-builder
 WORKDIR /app/frontend
 
 # 复制前端依赖文件
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+COPY frontend/package.json ./
+# 如果package-lock.json存在则复制，否则使用npm install
+COPY frontend/package-lock.json* ./
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
 # 复制前端源代码并构建
 COPY frontend/ .
