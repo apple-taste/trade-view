@@ -5,23 +5,40 @@ from datetime import datetime
 import os
 from pathlib import Path
 
-# 数据库文件路径（确保持久化）
-# Koyeb可能不支持VOLUME挂载，使用环境变量指定的路径
-# 如果DB_DIR未设置，使用当前目录（本地开发）
-# 如果设置了DB_DIR，使用该目录（生产环境）
-DB_DIR = Path(os.getenv("DB_DIR", "."))
-DB_DIR.mkdir(parents=True, exist_ok=True)
-DATABASE_PATH = DB_DIR / "database.db"
-DATABASE_URL = f"sqlite+aiosqlite:///{DATABASE_PATH}"
+# 数据库配置：支持PostgreSQL和SQLite
+# 优先使用PostgreSQL（生产环境），如果没有配置则使用SQLite（本地开发）
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-# 打印数据库路径用于调试
-print(f"📦 [数据库] 数据库文件路径: {DATABASE_PATH}")
-print(f"📦 [数据库] DB_DIR环境变量: {os.getenv('DB_DIR', '未设置（使用当前目录）')}")
-print(f"📦 [数据库] 数据库文件存在: {DATABASE_PATH.exists()}")
-if DATABASE_PATH.exists():
-    import os as os_module
-    file_size = os_module.path.getsize(DATABASE_PATH)
-    print(f"📦 [数据库] 数据库文件大小: {file_size} 字节")
+if DATABASE_URL:
+    # 使用PostgreSQL（生产环境）
+    # DATABASE_URL格式：postgresql+asyncpg://user:password@host:port/database
+    # 或者：postgresql://user:password@host:port/database（会自动转换为asyncpg）
+    if DATABASE_URL.startswith("postgresql://"):
+        # 转换为asyncpg驱动
+        DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+    elif not DATABASE_URL.startswith("postgresql+asyncpg://"):
+        # 如果不是标准格式，尝试添加asyncpg
+        DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+    
+    print(f"📦 [数据库] 使用PostgreSQL数据库")
+    print(f"📦 [数据库] DATABASE_URL: {DATABASE_URL.split('@')[0]}@***")  # 隐藏密码
+    DB_TYPE = "PostgreSQL"
+else:
+    # 使用SQLite（本地开发）
+    DB_DIR = Path(os.getenv("DB_DIR", "."))
+    DB_DIR.mkdir(parents=True, exist_ok=True)
+    DATABASE_PATH = DB_DIR / "database.db"
+    DATABASE_URL = f"sqlite+aiosqlite:///{DATABASE_PATH}"
+    
+    print(f"📦 [数据库] 使用SQLite数据库（本地开发）")
+    print(f"📦 [数据库] 数据库文件路径: {DATABASE_PATH}")
+    print(f"📦 [数据库] DB_DIR环境变量: {os.getenv('DB_DIR', '未设置（使用当前目录）')}")
+    print(f"📦 [数据库] 数据库文件存在: {DATABASE_PATH.exists()}")
+    if DATABASE_PATH.exists():
+        import os as os_module
+        file_size = os_module.path.getsize(DATABASE_PATH)
+        print(f"📦 [数据库] 数据库文件大小: {file_size} 字节")
+    DB_TYPE = "SQLite"
 
 engine = create_async_engine(DATABASE_URL, echo=False)  # 关闭echo减少日志
 AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
