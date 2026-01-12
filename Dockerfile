@@ -41,4 +41,5 @@ EXPOSE 8000
 
 # 启动应用，使用PORT环境变量
 # 使用shell形式确保环境变量正确扩展
-CMD sh -c "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"
+# 注意：main.py在/app目录下，所以直接使用main:app
+CMD sh -c "cd /app && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --log-level info"
