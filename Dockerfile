@@ -36,8 +36,15 @@ COPY --from=frontend-builder /app/frontend/dist ./static
 # 创建静态文件目录（如果不存在）
 RUN mkdir -p ./static
 
+# 创建数据目录用于数据库持久化
+RUN mkdir -p /data
+
+# 设置数据目录环境变量
+ENV DB_DIR=/data
+
 # 暴露端口（PORT将在运行时由Koyeb设置）
 EXPOSE 8000
+VOLUME ["/data"]
 
 # 启动应用，使用PORT环境变量
 # 使用shell形式确保环境变量正确扩展

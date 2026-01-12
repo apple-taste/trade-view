@@ -2,10 +2,20 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.orm import declarative_base
 from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, Date, UniqueConstraint
 from datetime import datetime
+import os
+from pathlib import Path
 
-DATABASE_URL = "sqlite+aiosqlite:///./database.db"
+# 数据库文件路径（确保持久化）
+# 在Docker中使用/data目录，本地开发使用当前目录
+DB_DIR = Path(os.getenv("DB_DIR", "."))
+DB_DIR.mkdir(parents=True, exist_ok=True)
+DATABASE_PATH = DB_DIR / "database.db"
+DATABASE_URL = f"sqlite+aiosqlite:///{DATABASE_PATH}"
 
-engine = create_async_engine(DATABASE_URL, echo=True)
+# 打印数据库路径用于调试
+print(f"📦 [数据库] 数据库文件路径: {DATABASE_PATH}")
+
+engine = create_async_engine(DATABASE_URL, echo=False)  # 关闭echo减少日志
 AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 Base = declarative_base()
