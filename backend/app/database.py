@@ -6,7 +6,9 @@ import os
 from pathlib import Path
 
 # 数据库文件路径（确保持久化）
-# 在Docker中使用/data目录，本地开发使用当前目录
+# Koyeb可能不支持VOLUME挂载，使用环境变量指定的路径
+# 如果DB_DIR未设置，使用当前目录（本地开发）
+# 如果设置了DB_DIR，使用该目录（生产环境）
 DB_DIR = Path(os.getenv("DB_DIR", "."))
 DB_DIR.mkdir(parents=True, exist_ok=True)
 DATABASE_PATH = DB_DIR / "database.db"
@@ -14,6 +16,12 @@ DATABASE_URL = f"sqlite+aiosqlite:///{DATABASE_PATH}"
 
 # 打印数据库路径用于调试
 print(f"📦 [数据库] 数据库文件路径: {DATABASE_PATH}")
+print(f"📦 [数据库] DB_DIR环境变量: {os.getenv('DB_DIR', '未设置（使用当前目录）')}")
+print(f"📦 [数据库] 数据库文件存在: {DATABASE_PATH.exists()}")
+if DATABASE_PATH.exists():
+    import os as os_module
+    file_size = os_module.path.getsize(DATABASE_PATH)
+    print(f"📦 [数据库] 数据库文件大小: {file_size} 字节")
 
 engine = create_async_engine(DATABASE_URL, echo=False)  # 关闭echo减少日志
 AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

@@ -65,6 +65,11 @@ def create_access_token(user_id: int) -> str:
 async def register(user_data: UserRegister, db: AsyncSession = Depends(get_db)):
     logger.info(f"🔐 [注册] 用户名: {user_data.username}, 邮箱: {user_data.email}")
     
+    # 调试：检查数据库中是否有用户
+    all_users_result = await db.execute(select(User))
+    all_users = all_users_result.scalars().all()
+    logger.info(f"📊 [注册调试] 数据库中用户总数: {len(all_users)}")
+    
     # 检查用户是否已存在
     result = await db.execute(
         select(User).where((User.username == user_data.username) | (User.email == user_data.email))
@@ -159,8 +164,22 @@ async def login(user_data: UserLogin, db: AsyncSession = Depends(get_db)):
     )
     user = result.scalar_one_or_none()
     
-    if not user or not pwd_context.verify(user_data.password, user.password_hash):
-        logger.warning(f"❌ [登录失败] 用户名或密码错误: {user_data.username}")
+    # 调试：检查数据库中是否有用户
+    all_users_result = await db.execute(select(User))
+    all_users = all_users_result.scalars().all()
+    logger.info(f"📊 [登录调试] 数据库中用户总数: {len(all_users)}")
+    if all_users:
+        logger.info(f"📊 [登录调试] 用户列表: {[u.username for u in all_users]}")
+    
+    if not user:
+        logger.warning(f"❌ [登录失败] 用户不存在: {user_data.username}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="用户名或密码错误"
+        )
+    
+    if not pwd_context.verify(user_data.password, user.password_hash):
+        logger.warning(f"❌ [登录失败] 密码错误: {user_data.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用户名或密码错误"
