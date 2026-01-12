@@ -7,6 +7,6 @@
     "NODE_ENV": "production",
     "LOG_LEVEL": "info",
     "JWT_SECRET": "Rik6AYOIG7iTO9ZSklubA2_mjFtyWizYbCrRheDSgiM",
-    "DB_DIR": "/data"
+    "DATABASE_URL": "postgresql://postgres:ZQjy9909989@db.cfakngtqgzgtfswldnuz.supabase.co:5432/postgres"
   }
 }
