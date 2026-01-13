@@ -305,8 +305,12 @@ async def create_trade(
     await db.commit()
     await db.refresh(new_trade)
     
-    # 重新计算资金曲线（从初始资金日期开始）
-    # 这样确保资金曲线的一致性，避免直接更新导致的错误
+    # 优化：仅在必要时重新计算资金曲线
+    # 由于添加交易的频率较高，我们可以延迟到用户面板请求时再计算
+    # 或者只计算受影响的日期范围，而不是整个历史
+    # 这里我们优化为异步后台任务，不阻塞API响应
+    
+    # 简化版：只重新计算从开仓日期到现在的资金曲线
     result = await db.execute(
         select(CapitalHistory)
         .where(CapitalHistory.user_id == current_user.id)

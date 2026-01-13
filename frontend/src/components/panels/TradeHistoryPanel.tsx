@@ -272,12 +272,16 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       setEditingTrade(null);
       resetForm();
       
-      // 刷新相关面板
-      refreshCalendar(); // 刷新日历标记
-      refreshPositions(); // 刷新持仓（如果有新持仓）
-      refreshAnalysis(); // 刷新AI分析
-      refreshUserPanel(); // 刷新用户面板（资金可能变化）
-      fetchTrades(); // 刷新当前列表
+      // 优化：并行刷新相关面板，减少等待时间
+      Promise.all([
+        fetchTrades(), // 刷新当前列表
+        refreshCalendar(), // 刷新日历标记
+        refreshPositions(), // 刷新持仓（如果有新持仓）
+        refreshUserPanel(), // 刷新用户面板（资金可能变化）
+        refreshAnalysis() // 刷新AI分析（最后刷新，因为最耗时）
+      ]).catch(error => {
+        console.error('刷新面板失败:', error);
+      });
     } catch (error: any) {
       alert(error.response?.data?.detail || '操作失败');
     }
