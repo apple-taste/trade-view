@@ -107,6 +107,19 @@ code {
   .jojo-input[type="datetime-local"] {
     min-width: 0;
     width: 100%;
+    max-width: 100%;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  
+  /* 移动设备上datetime-local输入框的特殊处理 */
+  @media (max-width: 768px) {
+    .jojo-input[type="datetime-local"] {
+      font-size: 16px; /* 防止iOS自动缩放 */
+      width: 100%;
+      max-width: 100%;
+      box-sizing: border-box;
+    }
   }
   
   .jojo-input:focus {

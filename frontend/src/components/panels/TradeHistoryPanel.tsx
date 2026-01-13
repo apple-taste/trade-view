@@ -586,8 +586,8 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       )}
 
       {showForm && (
-        <form onSubmit={handleSubmit} className="mb-2 p-2 bg-jojo-blue-light rounded space-y-2 border border-jojo-gold text-xs">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <form onSubmit={handleSubmit} className="mb-2 p-2 bg-jojo-blue-light rounded space-y-2 border border-jojo-gold text-xs overflow-x-hidden max-w-full">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
             {/* 提示信息 */}
             {formData.risk_per_trade && formData.buy_price && formData.stop_loss_price && !sharesManuallySet && (
               <div className="col-span-2 p-2 bg-green-500/20 border border-green-500/50 rounded text-xs text-green-300">
@@ -679,9 +679,14 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
                 required
               />
             </div>
-            {/* 编辑已平仓交易时显示离场价格和离场时间 */}
-            {editingTrade && (editingTrade.status === 'closed' || editingTrade.sell_price) && (
+            {/* 编辑已平仓交易时显示离场价格和离场时间 - 只要有sell_price或close_time就显示 */}
+            {editingTrade && (editingTrade.sell_price || editingTrade.close_time || formData.sell_price || formData.close_time) && (
               <>
+                <div className="col-span-1 md:col-span-2">
+                  <div className="p-2 bg-blue-500/20 border border-blue-500/50 rounded text-xs text-blue-300 mb-2">
+                    💡 <strong>编辑已平仓交易</strong>：可以修改离场价格和离场时间，修改后会自动重新计算盈亏和资金曲线
+                  </div>
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-jojo-gold mb-1">
                     离场价格
