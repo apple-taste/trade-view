@@ -263,7 +263,7 @@ export default function PositionPanel() {
       <div className="flex justify-between items-center mb-2">
         <h2 className="jojo-title text-lg">持仓</h2>
         <button
-          onClick={refreshPrices}
+          onClick={() => refreshPrices(true)}
           disabled={refreshing}
           className="jojo-button flex items-center space-x-1 p-1 text-xs"
           title="手动刷新价格"
