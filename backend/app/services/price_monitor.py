@@ -13,8 +13,8 @@ class PriceMonitor:
         self.price_cache: Dict[str, tuple[float, datetime, str]] = {}  # (价格, 时间戳, 来源)
         self.running = False
         self.task: asyncio.Task | None = None
-        self.CACHE_TTL = 30  # 30秒缓存（A股交易时间可以更频繁）
-        self.update_interval = 5  # 5秒更新一次价格
+        self.CACHE_TTL = 3  # 3秒缓存（确保价格实时性）
+        self.update_interval = 3  # 3秒更新一次价格
     
     def _normalize_stock_code(self, stock_code: str) -> str:
         """标准化股票代码格式
@@ -59,17 +59,25 @@ class PriceMonitor:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                     if resp.status == 200:
                         text = await resp.text()
-                        # 新浪API返回格式：var hq_str_sh600879="航天电子,15.50,15.60,..."
+                        # 新浪API返回格式：var hq_str_sh600879="航天电子,15.50,15.60,15.55,15.56,..."
+                        # 数据格式：股票名称,今日开盘价,昨日收盘价,当前价格,今日最高价,今日最低价,...
                         if text and '=' in text:
                             data_str = text.split('=')[1].strip().strip('"')
                             if data_str and ',' in data_str:
                                 parts = data_str.split(',')
                                 if len(parts) >= 4:
                                     # parts[0] 是股票名称
-                                    # parts[3] 是当前价格
+                                    # parts[3] 是当前价格（实时价格）
                                     stock_name = parts[0].strip()
-                                    price = float(parts[3])
-                                    return (round(price, 2), stock_name, "新浪财经")
+                                    try:
+                                        price = float(parts[3])
+                                        if price > 0:  # 确保价格有效
+                                            logger.debug(f"新浪API返回 {stock_code}: 名称={stock_name}, 价格={price}")
+                                            return (round(price, 2), stock_name, "新浪财经")
+                                        else:
+                                            logger.warning(f"新浪API返回 {stock_code} 价格无效: {price}")
+                                    except (ValueError, IndexError) as e:
+                                        logger.error(f"解析新浪API价格失败 {stock_code}: {e}, parts={parts[:10]}")
             return (None, None, "新浪财经")
         except Exception as e:
             logger.error(f"从新浪API获取股票 {stock_code} 信息失败: {e}")
@@ -136,16 +144,18 @@ class PriceMonitor:
             logger.error(f"获取股票 {stock_code} 名称失败: {e}")
             return None
     
-    async def fetch_stock_price(self, stock_code: str) -> tuple[float, str]:
+    async def fetch_stock_price(self, stock_code: str, force_refresh: bool = False) -> tuple[float, str]:
         """获取股票价格（带缓存和重试机制）
-        返回: (价格, 来源)"""
-        # 检查缓存
-        if stock_code in self.price_cache:
-            price_data = self.price_cache[stock_code]
-            if isinstance(price_data, tuple) and len(price_data) >= 3:
-                price, timestamp, source = price_data
-                if (datetime.utcnow() - timestamp).seconds < self.CACHE_TTL:
-                    return (price, source)
+        返回: (价格, 来源)
+        force_refresh: 是否强制刷新，忽略缓存"""
+        # 检查缓存（除非强制刷新）
+        if not force_refresh:
+            if stock_code in self.price_cache:
+                price_data = self.price_cache[stock_code]
+                if isinstance(price_data, tuple) and len(price_data) >= 3:
+                    price, timestamp, source = price_data
+                    if (datetime.utcnow() - timestamp).seconds < self.CACHE_TTL:
+                        return (price, source)
         
         # 尝试从新浪API获取
         price, source = await self.fetch_stock_price_sina(stock_code)
@@ -170,11 +180,11 @@ class PriceMonitor:
         logger.info(f"获取股票 {stock_code} 价格: {price} (来源: {source})")
         return (price, source)
     
-    async def batch_fetch_prices(self, stock_codes: list[str]) -> Dict[str, Dict[str, any]]:
+    async def batch_fetch_prices(self, stock_codes: list[str], force_refresh: bool = False) -> Dict[str, Dict[str, any]]:
         """批量获取股票价格
         返回: {stock_code: {"price": float, "source": str}}"""
         prices = {}
-        tasks = [self.fetch_stock_price(code) for code in stock_codes]
+        tasks = [self.fetch_stock_price(code, force_refresh=force_refresh) for code in stock_codes]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         for code, result in zip(stock_codes, results):

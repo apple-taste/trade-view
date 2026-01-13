@@ -24,10 +24,12 @@ class PriceResponse(BaseModel):
 )
 async def get_stock_price(
     stock_code: str,
+    force_refresh: bool = False,  # 强制刷新参数
     current_user: User = Depends(get_current_user)
 ):
-    """获取单个股票价格"""
-    price, source = await price_monitor.fetch_stock_price(stock_code)
+    """获取单个股票价格
+    force_refresh: 是否强制刷新，忽略缓存"""
+    price, source = await price_monitor.fetch_stock_price(stock_code, force_refresh=force_refresh)
     if price == 0.0:
         raise HTTPException(status_code=404, detail=f"无法获取股票 {stock_code} 的价格")
     
@@ -53,10 +55,12 @@ class BatchPriceResponse(BaseModel):
 )
 async def get_batch_prices(
     stock_codes: List[str],
+    force_refresh: bool = False,  # 强制刷新参数
     current_user: User = Depends(get_current_user)
 ):
-    """批量获取股票价格"""
-    prices = await price_monitor.batch_fetch_prices(stock_codes)
+    """批量获取股票价格
+    force_refresh: 是否强制刷新，忽略缓存"""
+    prices = await price_monitor.batch_fetch_prices(stock_codes, force_refresh=force_refresh)
     
     from datetime import datetime
     return [

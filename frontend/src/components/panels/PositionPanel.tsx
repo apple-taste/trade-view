@@ -74,13 +74,15 @@ export default function PositionPanel() {
     }
   };
 
-  const refreshPrices = async () => {
+  const refreshPrices = async (forceRefresh: boolean = true) => {
     if (positions.length === 0) return;
     
     try {
       setRefreshing(true);
       const stockCodes = positions.map(p => p.stock_code);
-      const response = await axios.post('/api/price/batch', stockCodes);
+      const response = await axios.post('/api/price/batch', stockCodes, {
+        params: { force_refresh: forceRefresh }
+      });
       
       // 更新价格和来源
       const priceMap = new Map<string, { price: number; source: string }>(
