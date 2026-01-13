@@ -412,27 +412,58 @@ async def update_trade(
         update_data = trade_data.model_dump(exclude_unset=True)
         logger.info(f"📝 [更新交易] 接收到的更新数据: {update_data}")
         
-        # 处理close_time（如果提供了）
+        # 处理open_time（如果提供了）- 确保是naive datetime
+        if 'open_time' in update_data and update_data['open_time']:
+            from datetime import datetime as dt, timezone
+            if isinstance(update_data['open_time'], str):
+                try:
+                    # 处理ISO格式字符串，支持带Z或不带时区
+                    open_time_str = update_data['open_time'].replace('Z', '+00:00')
+                    if '+' not in open_time_str and open_time_str.count(':') >= 2:
+                        # 如果没有时区信息，假设是UTC
+                        open_time_str += '+00:00'
+                    update_data['open_time'] = dt.fromisoformat(open_time_str)
+                    # 转换为UTC naive datetime
+                    if update_data['open_time'].tzinfo:
+                        update_data['open_time'] = update_data['open_time'].astimezone(timezone.utc).replace(tzinfo=None)
+                    logger.info(f"✅ [更新交易] open_time 解析成功: {update_data['open_time']}")
+                except Exception as e:
+                    logger.error(f"❌ [更新交易] 解析open_time失败: {e}, 原始值: {update_data['open_time']}")
+                    raise HTTPException(status_code=400, detail=f"开仓时间格式错误: {str(e)}")
+            elif isinstance(update_data['open_time'], dt):
+                # 如果已经是datetime对象，确保是naive
+                if update_data['open_time'].tzinfo:
+                    update_data['open_time'] = update_data['open_time'].astimezone(timezone.utc).replace(tzinfo=None)
+                    logger.info(f"✅ [更新交易] open_time 时区已移除: {update_data['open_time']}")
+        
+        # 处理close_time（如果提供了）- 确保是naive datetime
         if 'close_time' in update_data:
             if update_data['close_time'] is None or update_data['close_time'] == '':
                 # 如果明确设置为 None 或空字符串，则清空 close_time
                 update_data['close_time'] = None
             elif isinstance(update_data['close_time'], str):
                 # 如果是字符串，转换为datetime
-                from datetime import datetime as dt
+                from datetime import datetime as dt, timezone
                 try:
                     # 处理ISO格式字符串，支持带Z或不带时区
                     close_time_str = update_data['close_time'].replace('Z', '+00:00')
-                    if '+' not in close_time_str and close_time_str.count(':') == 2:
+                    if '+' not in close_time_str and close_time_str.count(':') >= 2:
                         # 如果没有时区信息，假设是UTC
                         close_time_str += '+00:00'
                     update_data['close_time'] = dt.fromisoformat(close_time_str)
+                    # 转换为UTC naive datetime
                     if update_data['close_time'].tzinfo:
-                        update_data['close_time'] = update_data['close_time'].replace(tzinfo=None)
+                        update_data['close_time'] = update_data['close_time'].astimezone(timezone.utc).replace(tzinfo=None)
                     logger.info(f"✅ [更新交易] close_time 解析成功: {update_data['close_time']}")
                 except Exception as e:
                     logger.error(f"❌ [更新交易] 解析close_time失败: {e}, 原始值: {update_data['close_time']}")
                     raise HTTPException(status_code=400, detail=f"离场时间格式错误: {str(e)}")
+            elif isinstance(update_data['close_time'], dt):
+                # 如果已经是datetime对象，确保是naive
+                if update_data['close_time'].tzinfo:
+                    from datetime import timezone
+                    update_data['close_time'] = update_data['close_time'].astimezone(timezone.utc).replace(tzinfo=None)
+                    logger.info(f"✅ [更新交易] close_time 时区已移除: {update_data['close_time']}")
         
         # 如果用户更新了买入价格或股数，且没有提供手续费，自动重新计算手续费
         if 'commission' not in update_data or update_data['commission'] is None:
