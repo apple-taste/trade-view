@@ -239,32 +239,40 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       }
       
       const data: any = {
-        ...formData,
-        shares: formData.shares ? parseInt(formData.shares) : undefined,  // 如果提供了手数，使用手数
-        risk_per_trade: formData.risk_per_trade ? parseFloat(formData.risk_per_trade) : undefined,  // 单笔风险（可选）
+        stock_code: formData.stock_code,
+        stock_name: formData.stock_name || undefined,
+        shares: formData.shares ? parseInt(formData.shares) : undefined,
         commission: parseFloat(formData.commission),
-        buy_commission: formData.buy_commission ? parseFloat(formData.buy_commission) : undefined,  // 买入手续费（留空自动计算）
-        sell_commission: formData.sell_commission ? parseFloat(formData.sell_commission) : undefined,  // 卖出手续费（留空自动计算）
+        buy_commission: formData.buy_commission ? parseFloat(formData.buy_commission) : undefined,
+        sell_commission: formData.sell_commission ? parseFloat(formData.sell_commission) : undefined,
         buy_price: parseFloat(formData.buy_price),
-        sell_price: formData.sell_price ? parseFloat(formData.sell_price) : undefined,  // 离场价格（编辑已平仓交易时使用）
-        close_time: utcCloseTimeString,  // 离场时间（编辑已平仓交易时使用）
+        sell_price: formData.sell_price ? parseFloat(formData.sell_price) : undefined,
         stop_loss_price: formData.stop_loss_price ? parseFloat(formData.stop_loss_price) : undefined,
         take_profit_price: formData.take_profit_price ? parseFloat(formData.take_profit_price) : undefined,
-        open_time: utcTimeString
+        stop_loss_alert: formData.stop_loss_alert,
+        take_profit_alert: formData.take_profit_alert,
+        notes: formData.notes || undefined,
+        open_time: utcTimeString,
+        close_time: utcCloseTimeString || undefined  // 明确设置为 undefined 如果为空
       };
       
-      // 如果用户提供了手数，优先使用手数；否则使用单笔风险
-      if (!data.shares && data.risk_per_trade) {
-        // 后端会根据单笔风险自动计算手数
-        delete data.shares;
-      } else if (data.shares) {
-        // 如果用户提供了手数，不使用单笔风险
-        delete data.risk_per_trade;
-      }
-
+      // 编辑时不需要发送 risk_per_trade
       if (editingTrade) {
+        // 移除不需要的字段
+        delete data.risk_per_trade;
+        
+        console.log('📝 [编辑交易] 发送更新数据:', data);
         await axios.put(`/api/trades/${editingTrade.id}`, data);
       } else {
+        // 新建交易时，如果用户提供了手数，优先使用手数；否则使用单笔风险
+        if (!data.shares && formData.risk_per_trade) {
+          data.risk_per_trade = parseFloat(formData.risk_per_trade);
+          delete data.shares;
+        } else if (data.shares) {
+          delete data.risk_per_trade;
+        }
+        
+        console.log('📝 [新建交易] 发送创建数据:', data);
         await axios.post('/api/trades', data);
       }
 
@@ -283,7 +291,9 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
         console.error('刷新面板失败:', error);
       });
     } catch (error: any) {
-      alert(error.response?.data?.detail || '操作失败');
+      console.error('❌ [交易操作] 操作失败:', error);
+      const errorMessage = error.response?.data?.detail || error.message || '操作失败';
+      alert(`❌ 操作失败\n\n${errorMessage}`);
     }
   };
 
