@@ -474,8 +474,10 @@ async def recalculate_capital_history(db: AsyncSession, user_id: int, start_date
         trade = event['trade']
         
         if event['type'] == 'open':
-            # 开仓：可用资金减少 = 买入价*手数 + 手续费
-            cost = trade.buy_price * trade.shares + (trade.commission or 0)
+            # 开仓：可用资金减少 = 买入价*手数 + 买入手续费
+            # 优先使用buy_commission，如果没有则使用commission（兼容旧数据）
+            buy_commission = trade.buy_commission if trade.buy_commission is not None else (trade.commission or 0)
+            cost = trade.buy_price * trade.shares + buy_commission
             available_funds -= cost
             # 持仓增加
             positions[trade.id] = trade
@@ -485,20 +487,42 @@ async def recalculate_capital_history(db: AsyncSession, user_id: int, start_date
             sell_amount = trade.sell_price * trade.shares
             # 计算卖出手续费
             if trade.profit_loss is not None:
-                # 如果有profit_loss，说明已经计算过总手续费
+                # 如果有profit_loss，说明已经计算过盈亏
                 # profit_loss = 卖出金额 - 买入成本 - 总手续费
+                # 其中：买入成本 = 买入价*手数 + 买入手续费
+                #      总手续费 = 买入手续费 + 卖出手续费
+                # 所以：profit_loss = 卖出金额 - (买入价*手数 + 买入手续费) - (买入手续费 + 卖出手续费)
+                #      = 卖出金额 - 买入价*手数 - 买入手续费 - 买入手续费 - 卖出手续费
+                #      = 卖出金额 - 买入价*手数 - 2*买入手续费 - 卖出手续费
+                # 
                 # 可用资金增加 = 卖出金额 - 卖出手续费
-                # 但我们需要反推卖出手续费...这里直接用 profit_loss
-                # 可用资金 = 之前的可用资金 + 买入成本 + profit_loss
-                buy_cost = trade.buy_price * trade.shares + (trade.commission or 0)
+                # 开仓时扣除了：买入价*手数 + 买入手续费
+                # 所以：可用资金增加 = (卖出金额 - 卖出手续费) - (买入价*手数 + 买入手续费) + (买入价*手数 + 买入手续费)
+                #      = 卖出金额 - 卖出手续费
+                # 
+                # 从profit_loss反推：
+                # profit_loss = 卖出金额 - 买入价*手数 - 买入手续费 - 卖出手续费
+                # 卖出金额 = profit_loss + 买入价*手数 + 买入手续费 + 卖出手续费
+                # 可用资金增加 = 卖出金额 - 卖出手续费 = profit_loss + 买入价*手数 + 买入手续费
+                # 
+                # 更简单的方法：开仓时扣除了 buy_cost = 买入价*手数 + 买入手续费
+                # 平仓时应该增加 = 卖出金额 - 卖出手续费
+                # 净变化 = (卖出金额 - 卖出手续费) - (买入价*手数 + 买入手续费) = profit_loss
+                # 所以：可用资金增加 = buy_cost + profit_loss
+                buy_commission = trade.buy_commission if trade.buy_commission is not None else (trade.commission or 0)
+                buy_cost = trade.buy_price * trade.shares + buy_commission
                 available_funds += buy_cost + trade.profit_loss
             else:
                 # 如果没有profit_loss，计算卖出手续费
-                sell_commission = default_calculator.calculate_sell_commission(
-                    trade.sell_price,
-                    trade.shares,
-                    trade.stock_code
-                )
+                # 优先使用已保存的卖出手续费
+                if trade.sell_commission is not None:
+                    sell_commission = trade.sell_commission
+                else:
+                    sell_commission = default_calculator.calculate_sell_commission(
+                        trade.sell_price,
+                        trade.shares,
+                        trade.stock_code
+                    )
                 available_funds += sell_amount - sell_commission
             
             # 持仓减少

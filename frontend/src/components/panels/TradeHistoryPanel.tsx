@@ -797,9 +797,9 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
                   <td className="py-1 px-2">
                     <div className="font-bold text-jojo-gold text-xs">
                       <div>{trade.stock_code}</div>
-                      {trade.stock_name && (
-                        <div className="text-white text-xs font-normal mt-0.5">{trade.stock_name}</div>
-                      )}
+                      <div className="text-white text-xs font-normal mt-0.5">
+                        {trade.stock_name || <span className="text-gray-500 italic">(未设置名称)</span>}
+                      </div>
                     </div>
                   </td>
                   {viewMode === 'all' && (
