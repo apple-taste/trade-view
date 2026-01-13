@@ -615,13 +615,14 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
                 required
               />
             </div>
-            <div>
+            <div className="w-full">
               <label className="block text-sm font-medium text-jojo-gold mb-1">开仓时间</label>
               <input
                 type="datetime-local"
                 value={formData.open_time}
                 onChange={(e) => setFormData({ ...formData, open_time: e.target.value })}
-                className="jojo-input w-full"
+                className="jojo-input w-full max-w-full"
+                style={{ maxWidth: '100%', boxSizing: 'border-box' }}
               />
             </div>
             <div>
