@@ -93,8 +93,9 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
   const [showForm, setShowForm] = useState(false);
   const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
   const [viewMode, setViewMode] = useState<'date' | 'all'>('date');
-  const [stockCodes, setStockCodes] = useState<string[]>([]);
+  const [stockCodes, setStockCodes] = useState<Array<{code: string; name: string}>>([]);
   const [selectedStockCode, setSelectedStockCode] = useState<string | null>(null);
+  const [selectedStockName, setSelectedStockName] = useState<string | null>(null);
   const [stockStatistics, setStockStatistics] = useState<StockStatistics | null>(null);
   const { refreshCalendar, refreshPositions, refreshAnalysis, refreshUserPanel, _tradeHistoryRefreshKey } = useTrade();
   const { clearAlertsByStockCode } = useAlerts();
@@ -161,6 +162,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       fetchStockCodes();
     } else {
       setSelectedStockCode(null);
+      setSelectedStockName(null);
       setStockStatistics(null);
     }
   }, [selectedDate, viewMode, _tradeHistoryRefreshKey]);
@@ -188,10 +190,16 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       const response = await axios.get(`/api/trades/stock/${stockCode}`);
       setTrades(response.data.trades);
       setStockStatistics(response.data.statistics);
+      // 从交易记录中获取股票名称（取第一条记录的股票名称）
+      if (response.data.trades && response.data.trades.length > 0) {
+        const firstTrade = response.data.trades[0];
+        setSelectedStockName(firstTrade.stock_name || null);
+      }
     } catch (error) {
       console.error('获取股票交易记录失败:', error);
       setTrades([]);
       setStockStatistics(null);
+      setSelectedStockName(null);
     } finally {
       setLoading(false);
     }
@@ -482,7 +490,11 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       {viewMode === 'all' && (
         <div className="mb-2 space-y-2">
           <div className="p-1 bg-jojo-blue-light rounded text-xs text-jojo-gold">
-            📋 查看全部历史订单 {selectedStockCode ? `- ${selectedStockCode}` : ''} ({trades.length} 条记录)
+            📋 查看全部历史订单 {selectedStockCode ? (
+              <span className="text-white">
+                - {selectedStockCode} {selectedStockName && `(${selectedStockName})`}
+              </span>
+            ) : ''} ({trades.length} 条记录)
           </div>
           
           {/* 股票代码筛选器 */}
@@ -493,6 +505,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
                 <button
                   onClick={() => {
                     setSelectedStockCode(null);
+                    setSelectedStockName(null);
                     setStockStatistics(null);
                   }}
                   className={`px-3 py-1 rounded text-xs font-medium transition-all ${
@@ -503,17 +516,18 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
                 >
                   全部 ({stockCodes.length})
                 </button>
-                {stockCodes.map((code) => (
+                {stockCodes.map((stock) => (
                   <button
-                    key={code}
-                    onClick={() => setSelectedStockCode(code)}
+                    key={stock.code}
+                    onClick={() => setSelectedStockCode(stock.code)}
                     className={`px-3 py-1 rounded text-xs font-medium transition-all ${
-                      selectedStockCode === code
+                      selectedStockCode === stock.code
                         ? 'bg-jojo-gold text-gray-900 shadow-lg'
                         : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                     }`}
+                    title={stock.name || stock.code}
                   >
-                    {code}
+                    {stock.code} {stock.name && <span className="text-gray-400">({stock.name})</span>}
                   </button>
                 ))}
               </div>
@@ -524,7 +538,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
           {selectedStockCode && stockStatistics && (
             <div className="p-3 bg-gradient-to-r from-jojo-blue-light to-jojo-blue-dark rounded border-2 border-jojo-gold">
               <div className="text-sm font-bold text-jojo-gold mb-2">
-                📈 {selectedStockCode} 交易统计
+                📈 {selectedStockCode} {selectedStockName && <span className="text-white">({selectedStockName})</span>} 交易统计
               </div>
               <div className="grid grid-cols-3 gap-3 text-xs">
                 <div className="bg-gray-800/50 p-2 rounded">
@@ -751,7 +765,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
         <table className="jojo-table text-xs">
           <thead className="sticky top-0 bg-jojo-blue">
             <tr>
-              <th className="py-1 px-2">代码</th>
+              <th className="py-1 px-2">代码/名称</th>
               {viewMode === 'all' && <th className="py-1 px-2">开仓时间</th>}
               {viewMode === 'all' && <th className="py-1 px-2">离场时间</th>}
               <th className="py-1 px-2">手数</th>
@@ -782,8 +796,10 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
                 <tr key={trade.id} className="hover:bg-jojo-blue-light">
                   <td className="py-1 px-2">
                     <div className="font-bold text-jojo-gold text-xs">
-                      {trade.stock_code}
-                      {trade.stock_name && <span className="text-white">-{trade.stock_name}</span>}
+                      <div>{trade.stock_code}</div>
+                      {trade.stock_name && (
+                        <div className="text-white text-xs font-normal mt-0.5">{trade.stock_name}</div>
+                      )}
                     </div>
                   </td>
                   {viewMode === 'all' && (

@@ -546,12 +546,12 @@ async def get_trade_dates(
 
 @router.get(
     "/stock-codes",
-    response_model=list[str],
+    response_model=list[dict],
     summary="获取所有股票代码列表",
     description="""
-    获取当前用户所有交易记录中的唯一股票代码列表。
+    获取当前用户所有交易记录中的唯一股票代码列表（包含股票名称）。
     
-    返回格式：["600879", "002426", ...]
+    返回格式：[{"code": "600879", "name": "航空电子"}, {"code": "002426", "name": "胜利精密"}, ...]
     用于在历史订单面板中按股票代码筛选。
     """,
     responses={
@@ -563,16 +563,31 @@ async def get_stock_codes(
     db: AsyncSession = Depends(get_db)
 ):
     try:
+        # 获取所有交易记录，然后提取唯一的股票代码和名称
         result = await db.execute(
-            select(distinct(Trade.stock_code))
+            select(Trade.stock_code, Trade.stock_name)
             .where(
                 Trade.user_id == current_user.id,
-                Trade.is_deleted == False
+                Trade.is_deleted == False,
+                Trade.stock_code.isnot(None)
             )
             .order_by(Trade.stock_code.asc())
         )
-        stock_codes = result.scalars().all()
-        return [code for code in stock_codes if code]  # 过滤空值
+        stock_data = result.all()
+        
+        # 构建返回数据：去重并保留股票名称（取第一个非空的名称）
+        stock_dict = {}
+        for code, name in stock_data:
+            if code:
+                if code not in stock_dict:
+                    stock_dict[code] = name or ""
+                elif not stock_dict[code] and name:
+                    # 如果之前没有名称，现在有名称了，更新它
+                    stock_dict[code] = name
+        
+        # 转换为列表格式
+        stock_list = [{"code": code, "name": name} for code, name in sorted(stock_dict.items())]
+        return stock_list
     except Exception as e:
         logger.error(f"获取股票代码列表失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取股票代码列表失败: {str(e)}")
