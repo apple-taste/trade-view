@@ -587,7 +587,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
 
       {showForm && (
         <form onSubmit={handleSubmit} className="mb-2 p-2 bg-jojo-blue-light rounded space-y-2 border border-jojo-gold text-xs">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* 提示信息 */}
             {formData.risk_per_trade && formData.buy_price && formData.stop_loss_price && !sharesManuallySet && (
               <div className="col-span-2 p-2 bg-green-500/20 border border-green-500/50 rounded text-xs text-green-300">
@@ -621,7 +621,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
                 type="datetime-local"
                 value={formData.open_time}
                 onChange={(e) => setFormData({ ...formData, open_time: e.target.value })}
-                className="jojo-input"
+                className="jojo-input w-full"
               />
             </div>
             <div>
@@ -680,7 +680,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
               />
             </div>
             {/* 编辑已平仓交易时显示离场价格和离场时间 */}
-            {editingTrade && editingTrade.status === 'closed' && (
+            {editingTrade && (editingTrade.status === 'closed' || editingTrade.sell_price) && (
               <>
                 <div>
                   <label className="block text-sm font-medium text-jojo-gold mb-1">
@@ -692,7 +692,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
                     step="0.01"
                     value={formData.sell_price}
                     onChange={(e) => setFormData({ ...formData, sell_price: e.target.value })}
-                    className="jojo-input"
+                    className="jojo-input w-full"
                     placeholder="例如：15.50"
                   />
                 </div>
@@ -702,7 +702,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
                     type="datetime-local"
                     value={formData.close_time}
                     onChange={(e) => setFormData({ ...formData, close_time: e.target.value })}
-                    className="jojo-input"
+                    className="jojo-input w-full"
                   />
                 </div>
               </>

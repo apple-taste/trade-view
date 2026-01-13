@@ -99,6 +99,14 @@ code {
     background-color: #16213e;
     border: 2px solid #FFD700;
     @apply focus:outline-none;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+  
+  /* datetime-local输入框在移动设备上的特殊处理 */
+  .jojo-input[type="datetime-local"] {
+    min-width: 0;
+    width: 100%;
   }
   
   .jojo-input:focus {
