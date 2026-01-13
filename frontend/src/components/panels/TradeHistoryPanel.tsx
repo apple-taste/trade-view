@@ -407,12 +407,14 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       stock_code: '',
       stock_name: '',
       open_time: getSelectedDateBeijingTime(), // 使用选中日期的北京时间
+      close_time: '',  // 离场时间
       shares: '',
       risk_per_trade: '',  // 单笔风险
       commission: '0',
       buy_commission: '',  // 买入手续费，留空自动计算
       sell_commission: '',  // 卖出手续费，留空自动计算
       buy_price: '',
+      sell_price: '',  // 离场价格
       stop_loss_price: '',
       take_profit_price: '',
       stop_loss_alert: false,
