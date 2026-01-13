@@ -4,8 +4,60 @@ from datetime import datetime
 import aiohttp
 import logging
 import json
+import time
 
 logger = logging.getLogger(__name__)
+
+# API性能统计
+class APIPerformance:
+    def __init__(self):
+        self.stats: Dict[str, Dict] = {}  # {api_name: {count, total_time, avg_time, success_count, fail_count}}
+    
+    def record(self, api_name: str, response_time: float, success: bool):
+        """记录API调用性能"""
+        if api_name not in self.stats:
+            self.stats[api_name] = {
+                'count': 0,
+                'total_time': 0.0,
+                'avg_time': 0.0,
+                'success_count': 0,
+                'fail_count': 0,
+                'min_time': float('inf'),
+                'max_time': 0.0
+            }
+        
+        stats = self.stats[api_name]
+        stats['count'] += 1
+        stats['total_time'] += response_time
+        stats['avg_time'] = stats['total_time'] / stats['count']
+        stats['min_time'] = min(stats['min_time'], response_time)
+        stats['max_time'] = max(stats['max_time'], response_time)
+        
+        if success:
+            stats['success_count'] += 1
+        else:
+            stats['fail_count'] += 1
+    
+    def get_best_api(self) -> Optional[str]:
+        """获取平均响应时间最短的API"""
+        if not self.stats:
+            return None
+        
+        best_api = None
+        best_avg_time = float('inf')
+        
+        for api_name, stats in self.stats.items():
+            if stats['success_count'] > 0 and stats['avg_time'] < best_avg_time:
+                best_avg_time = stats['avg_time']
+                best_api = api_name
+        
+        return best_api
+    
+    def get_stats_summary(self) -> Dict[str, Dict]:
+        """获取性能统计摘要"""
+        return self.stats.copy()
+
+api_performance = APIPerformance()
 
 class PriceMonitor:
     def __init__(self):
@@ -49,6 +101,7 @@ class PriceMonitor:
     async def fetch_stock_info_sina(self, stock_code: str) -> tuple[Optional[float], Optional[str], str]:
         """使用新浪财经API获取A股价格和名称（免费）
         返回: (价格, 名称, 来源)"""
+        start_time = time.time()
         try:
             normalized_code = self._normalize_stock_code(stock_code)
             url = f"http://hq.sinajs.cn/list={normalized_code}"
@@ -56,7 +109,7 @@ class PriceMonitor:
             # 使用HTTP连接器，避免SSL问题
             connector = aiohttp.TCPConnector(ssl=False)
             async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=2)) as resp:  # 减少超时到2秒
                     if resp.status == 200:
                         text = await resp.text()
                         # 新浪API返回格式：var hq_str_sh600879="航天电子,15.50,15.60,15.55,15.56,..."
@@ -72,14 +125,20 @@ class PriceMonitor:
                                     try:
                                         price = float(parts[3])
                                         if price > 0:  # 确保价格有效
-                                            logger.debug(f"新浪API返回 {stock_code}: 名称={stock_name}, 价格={price}")
+                                            response_time = time.time() - start_time
+                                            api_performance.record("新浪财经", response_time, True)
+                                            logger.debug(f"新浪API返回 {stock_code}: 名称={stock_name}, 价格={price}, 延迟={response_time*1000:.1f}ms")
                                             return (round(price, 2), stock_name, "新浪财经")
                                         else:
                                             logger.warning(f"新浪API返回 {stock_code} 价格无效: {price}")
                                     except (ValueError, IndexError) as e:
                                         logger.error(f"解析新浪API价格失败 {stock_code}: {e}, parts={parts[:10]}")
+            response_time = time.time() - start_time
+            api_performance.record("新浪财经", response_time, False)
             return (None, None, "新浪财经")
         except Exception as e:
+            response_time = time.time() - start_time
+            api_performance.record("新浪财经", response_time, False)
             logger.error(f"从新浪API获取股票 {stock_code} 信息失败: {e}")
             return (None, None, "新浪财经")
     
@@ -92,6 +151,7 @@ class PriceMonitor:
     async def fetch_stock_info_tencent(self, stock_code: str) -> tuple[Optional[float], Optional[str], str]:
         """使用腾讯财经API获取A股价格和名称（备用方案）
         返回: (价格, 名称, 来源)"""
+        start_time = time.time()
         try:
             normalized_code = self._normalize_stock_code(stock_code)
             # 腾讯API格式：使用HTTP避免SSL证书问题
@@ -100,7 +160,7 @@ class PriceMonitor:
             # 使用HTTP连接器，避免SSL问题
             connector = aiohttp.TCPConnector(ssl=False)
             async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=2)) as resp:  # 减少超时到2秒
                     if resp.status == 200:
                         text = await resp.text()
                         # 腾讯API返回格式：v_sh600879="航天电子~15.50~15.60~..."
@@ -113,9 +173,16 @@ class PriceMonitor:
                                     # parts[3] 是当前价格
                                     stock_name = parts[1].strip()
                                     price = float(parts[3])
+                                    response_time = time.time() - start_time
+                                    api_performance.record("腾讯财经", response_time, True)
+                                    logger.debug(f"腾讯API返回 {stock_code}: 名称={stock_name}, 价格={price}, 延迟={response_time*1000:.1f}ms")
                                     return (round(price, 2), stock_name, "腾讯财经")
+            response_time = time.time() - start_time
+            api_performance.record("腾讯财经", response_time, False)
             return (None, None, "腾讯财经")
         except Exception as e:
+            response_time = time.time() - start_time
+            api_performance.record("腾讯财经", response_time, False)
             logger.error(f"从腾讯API获取股票 {stock_code} 信息失败: {e}")
             return (None, None, "腾讯财经")
     

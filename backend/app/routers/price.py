@@ -72,3 +72,35 @@ async def get_batch_prices(
         )
         for code, price_info in prices.items()
     ]
+
+@router.get(
+    "/performance",
+    summary="获取API性能统计",
+    description="获取各API的性能统计信息，包括平均响应时间、成功率等"
+)
+async def get_api_performance(
+    current_user: User = Depends(get_current_user)
+):
+    """获取API性能统计"""
+    stats = api_performance.get_stats_summary()
+    
+    # 格式化统计数据
+    formatted_stats = {}
+    for api_name, data in stats.items():
+        formatted_stats[api_name] = {
+            "调用次数": data['count'],
+            "成功次数": data['success_count'],
+            "失败次数": data['fail_count'],
+            "成功率": f"{(data['success_count'] / data['count'] * 100):.1f}%" if data['count'] > 0 else "0%",
+            "平均延迟": f"{data['avg_time']*1000:.1f}ms",
+            "最小延迟": f"{data['min_time']*1000:.1f}ms" if data['min_time'] != float('inf') else "N/A",
+            "最大延迟": f"{data['max_time']*1000:.1f}ms"
+        }
+    
+    best_api = api_performance.get_best_api()
+    
+    return {
+        "statistics": formatted_stats,
+        "best_api": best_api,
+        "recommendation": f"当前推荐使用: {best_api}" if best_api else "暂无统计数据"
+    }
