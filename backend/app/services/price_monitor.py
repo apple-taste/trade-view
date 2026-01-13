@@ -46,9 +46,9 @@ class PriceMonitor:
         else:
             return code
     
-    async def fetch_stock_price_sina(self, stock_code: str) -> tuple[Optional[float], str]:
-        """使用新浪财经API获取A股价格（免费）
-        返回: (价格, 来源)"""
+    async def fetch_stock_info_sina(self, stock_code: str) -> tuple[Optional[float], Optional[str], str]:
+        """使用新浪财经API获取A股价格和名称（免费）
+        返回: (价格, 名称, 来源)"""
         try:
             normalized_code = self._normalize_stock_code(stock_code)
             url = f"http://hq.sinajs.cn/list={normalized_code}"
@@ -64,18 +64,26 @@ class PriceMonitor:
                             data_str = text.split('=')[1].strip().strip('"')
                             if data_str and ',' in data_str:
                                 parts = data_str.split(',')
-                                if len(parts) >= 3:
+                                if len(parts) >= 4:
+                                    # parts[0] 是股票名称
                                     # parts[3] 是当前价格
+                                    stock_name = parts[0].strip()
                                     price = float(parts[3])
-                                    return (round(price, 2), "新浪财经")
-            return (None, "新浪财经")
+                                    return (round(price, 2), stock_name, "新浪财经")
+            return (None, None, "新浪财经")
         except Exception as e:
-            logger.error(f"从新浪API获取股票 {stock_code} 价格失败: {e}")
-            return (None, "新浪财经")
+            logger.error(f"从新浪API获取股票 {stock_code} 信息失败: {e}")
+            return (None, None, "新浪财经")
     
-    async def fetch_stock_price_tencent(self, stock_code: str) -> tuple[Optional[float], str]:
-        """使用腾讯财经API获取A股价格（备用方案）
+    async def fetch_stock_price_sina(self, stock_code: str) -> tuple[Optional[float], str]:
+        """使用新浪财经API获取A股价格（免费）
         返回: (价格, 来源)"""
+        price, _, source = await self.fetch_stock_info_sina(stock_code)
+        return (price, source)
+    
+    async def fetch_stock_info_tencent(self, stock_code: str) -> tuple[Optional[float], Optional[str], str]:
+        """使用腾讯财经API获取A股价格和名称（备用方案）
+        返回: (价格, 名称, 来源)"""
         try:
             normalized_code = self._normalize_stock_code(stock_code)
             # 腾讯API格式：使用HTTP避免SSL证书问题
@@ -92,14 +100,41 @@ class PriceMonitor:
                             data_str = text.split('=')[1].strip().strip('"')
                             if data_str and '~' in data_str:
                                 parts = data_str.split('~')
-                                if len(parts) >= 3:
+                                if len(parts) >= 4:
+                                    # parts[1] 是股票名称
                                     # parts[3] 是当前价格
+                                    stock_name = parts[1].strip()
                                     price = float(parts[3])
-                                    return (round(price, 2), "腾讯财经")
-            return (None, "腾讯财经")
+                                    return (round(price, 2), stock_name, "腾讯财经")
+            return (None, None, "腾讯财经")
         except Exception as e:
-            logger.error(f"从腾讯API获取股票 {stock_code} 价格失败: {e}")
-            return (None, "腾讯财经")
+            logger.error(f"从腾讯API获取股票 {stock_code} 信息失败: {e}")
+            return (None, None, "腾讯财经")
+    
+    async def fetch_stock_price_tencent(self, stock_code: str) -> tuple[Optional[float], str]:
+        """使用腾讯财经API获取A股价格（备用方案）
+        返回: (价格, 来源)"""
+        price, _, source = await self.fetch_stock_info_tencent(stock_code)
+        return (price, source)
+    
+    async def fetch_stock_name(self, stock_code: str) -> Optional[str]:
+        """获取股票名称
+        返回: 股票名称，如果失败返回None"""
+        try:
+            # 尝试从新浪API获取
+            _, name, _ = await self.fetch_stock_info_sina(stock_code)
+            if name:
+                return name
+            
+            # 如果失败，尝试腾讯API
+            _, name, _ = await self.fetch_stock_info_tencent(stock_code)
+            if name:
+                return name
+            
+            return None
+        except Exception as e:
+            logger.error(f"获取股票 {stock_code} 名称失败: {e}")
+            return None
     
     async def fetch_stock_price(self, stock_code: str) -> tuple[float, str]:
         """获取股票价格（带缓存和重试机制）

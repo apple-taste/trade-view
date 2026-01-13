@@ -12,6 +12,7 @@ from app.models import TradeCreate, TradeUpdate, TradeResponse
 from app.database import User
 from app.routers.user import recalculate_capital_history
 from app.services.commission_calculator import default_calculator
+from app.services.price_monitor import price_monitor
 
 router = APIRouter()
 
@@ -170,8 +171,19 @@ async def create_trade(
     else:
         open_time = datetime.utcnow()
     
+    # 如果用户没有提供股票名称，自动从API获取
+    stock_name = trade_data.stock_name
+    if not stock_name or stock_name.strip() == "":
+        logger.info(f"📝 [创建交易] 用户 {current_user.username}, 股票 {trade_data.stock_code} - 自动获取股票名称")
+        fetched_name = await price_monitor.fetch_stock_name(trade_data.stock_code)
+        if fetched_name:
+            stock_name = fetched_name
+            logger.info(f"   ✅ 获取到股票名称: {stock_name}")
+        else:
+            logger.warning(f"   ⚠️ 无法获取股票名称，将使用空值")
+    
     # 添加调试日志
-    logger.info(f"📝 [创建交易] 用户 {current_user.username}, 股票 {trade_data.stock_code}")
+    logger.info(f"📝 [创建交易] 用户 {current_user.username}, 股票 {trade_data.stock_code}, 名称: {stock_name}")
     logger.info(f"   接收到的open_time: {trade_data.open_time}")
     logger.info(f"   处理后的open_time (UTC): {open_time}")
     logger.info(f"   UTC日期: {open_time.date()}")
@@ -231,7 +243,7 @@ async def create_trade(
     new_trade = Trade(
         user_id=current_user.id,
         stock_code=trade_data.stock_code,
-        stock_name=trade_data.stock_name,
+        stock_name=stock_name,
         open_time=open_time,
         shares=shares,
         commission=commission,
