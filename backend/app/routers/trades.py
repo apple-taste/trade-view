@@ -42,6 +42,26 @@ async def get_all_trades(
     )
     trades = result.scalars().all()
     
+    # 收集需要获取名称的股票代码（批量处理，避免重复API调用）
+    stock_codes_to_fetch = {}
+    for trade in trades:
+        if (not trade.stock_name or trade.stock_name.strip() == "") and trade.stock_code:
+            if trade.stock_code not in stock_codes_to_fetch:
+                stock_codes_to_fetch[trade.stock_code] = []
+            stock_codes_to_fetch[trade.stock_code].append(trade)
+    
+    # 批量获取股票名称
+    for stock_code, trades_list in stock_codes_to_fetch.items():
+        fetched_name = await price_monitor.fetch_stock_name(stock_code)
+        if fetched_name:
+            for trade in trades_list:
+                trade.stock_name = fetched_name
+            logger.info(f"✅ 自动更新股票 {stock_code} 名称为: {fetched_name}")
+    
+    # 如果有更新，提交到数据库
+    if stock_codes_to_fetch:
+        await db.commit()
+    
     # 计算风险回报比并构建响应
     trade_responses = []
     for trade in trades:
@@ -109,6 +129,26 @@ async def get_trades_by_date(
         .order_by(Trade.open_time.desc())
     )
     trades = result.scalars().all()
+    
+    # 收集需要获取名称的股票代码（批量处理，避免重复API调用）
+    stock_codes_to_fetch = {}
+    for trade in trades:
+        if (not trade.stock_name or trade.stock_name.strip() == "") and trade.stock_code:
+            if trade.stock_code not in stock_codes_to_fetch:
+                stock_codes_to_fetch[trade.stock_code] = []
+            stock_codes_to_fetch[trade.stock_code].append(trade)
+    
+    # 批量获取股票名称
+    for stock_code, trades_list in stock_codes_to_fetch.items():
+        fetched_name = await price_monitor.fetch_stock_name(stock_code)
+        if fetched_name:
+            for trade in trades_list:
+                trade.stock_name = fetched_name
+            logger.info(f"✅ 自动更新股票 {stock_code} 名称为: {fetched_name}")
+    
+    # 如果有更新，提交到数据库
+    if stock_codes_to_fetch:
+        await db.commit()
     
     # 计算风险回报比并构建响应
     trade_responses = []
