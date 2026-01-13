@@ -34,10 +34,10 @@ export default function PositionPanel() {
   useEffect(() => {
     fetchPositions();
     
-    // 设置定时刷新价格（每5秒）
+    // 设置定时刷新价格（每500ms，毫秒级实时性）
     refreshIntervalRef.current = setInterval(() => {
-      refreshPrices();
-    }, 5000);
+      refreshPrices(true); // 强制刷新
+    }, 500); // 500ms = 0.5秒
 
     return () => {
       if (refreshIntervalRef.current) {

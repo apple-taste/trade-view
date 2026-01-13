@@ -13,8 +13,8 @@ class PriceMonitor:
         self.price_cache: Dict[str, tuple[float, datetime, str]] = {}  # (价格, 时间戳, 来源)
         self.running = False
         self.task: asyncio.Task | None = None
-        self.CACHE_TTL = 3  # 3秒缓存（确保价格实时性）
-        self.update_interval = 3  # 3秒更新一次价格
+        self.CACHE_TTL = 0.5  # 0.5秒缓存（毫秒级实时性）
+        self.update_interval = 0.5  # 0.5秒更新一次价格（500ms）
     
     def _normalize_stock_code(self, stock_code: str) -> str:
         """标准化股票代码格式
@@ -175,9 +175,26 @@ class PriceMonitor:
             logger.warning(f"获取股票 {stock_code} 价格失败，返回0")
             return (0.0, "获取失败")
         
+        # 检查价格是否变化
+        old_price = None
+        if stock_code in self.price_cache:
+            old_price_data = self.price_cache[stock_code]
+            if isinstance(old_price_data, tuple) and len(old_price_data) >= 3:
+                old_price = old_price_data[0]
+        
         # 更新缓存 (价格, 时间戳, 来源)
         self.price_cache[stock_code] = (price, datetime.utcnow(), source)
-        logger.info(f"获取股票 {stock_code} 价格: {price} (来源: {source})")
+        
+        # 如果价格变化，触发回调（毫秒级推送）
+        if old_price is not None and abs(old_price - price) > 0.001:  # 价格变化超过0.001元
+            logger.debug(f"💰 价格变化 {stock_code}: {old_price:.2f} -> {price:.2f}")
+            for callback in self.price_change_callbacks:
+                try:
+                    callback(stock_code, price, source)
+                except Exception as e:
+                    logger.error(f"价格变化回调执行失败: {e}")
+        
+        logger.debug(f"获取股票 {stock_code} 价格: {price} (来源: {source})")
         return (price, source)
     
     async def batch_fetch_prices(self, stock_codes: list[str], force_refresh: bool = False) -> Dict[str, Dict[str, any]]:
