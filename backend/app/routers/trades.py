@@ -391,13 +391,29 @@ async def update_trade(
     if not trade:
         raise HTTPException(status_code=404, detail="交易记录不存在或已被删除")
     
-    # 记录旧的手续费、买入价格和股数，用于判断是否需要重新计算资金曲线
+    # 记录旧的值，用于判断是否需要重新计算资金曲线
     old_commission = trade.commission
     old_buy_price = trade.buy_price
     old_shares = trade.shares
+    old_sell_price = trade.sell_price
+    old_sell_commission = trade.sell_commission
+    old_profit_loss = trade.profit_loss
     
     # 更新交易记录字段
     update_data = trade_data.model_dump(exclude_unset=True)
+    
+    # 处理close_time（如果提供了）
+    if 'close_time' in update_data and update_data['close_time']:
+        if isinstance(update_data['close_time'], str):
+            # 如果是字符串，转换为datetime
+            from datetime import datetime as dt
+            try:
+                update_data['close_time'] = dt.fromisoformat(update_data['close_time'].replace('Z', '+00:00'))
+                if update_data['close_time'].tzinfo:
+                    update_data['close_time'] = update_data['close_time'].replace(tzinfo=None)
+            except Exception as e:
+                logger.error(f"解析close_time失败: {e}")
+                del update_data['close_time']
     
     # 如果用户更新了买入价格或股数，且没有提供手续费，自动重新计算手续费
     if 'commission' not in update_data or update_data['commission'] is None:
@@ -405,12 +421,48 @@ async def update_trade(
         buy_price = update_data.get('buy_price', trade.buy_price)
         shares = update_data.get('shares', trade.shares)
         
-        # 如果买入价格或股数有变化，重新计算手续费
+        # 如果买入价格或股数有变化，重新计算买入手续费
         if 'buy_price' in update_data or 'shares' in update_data:
-            update_data['commission'] = default_calculator.calculate_buy_commission(
-                buy_price,
-                shares
+            buy_commission = default_calculator.calculate_buy_commission(buy_price, shares)
+            if 'buy_commission' not in update_data:
+                update_data['buy_commission'] = buy_commission
+    
+    # 如果用户更新了离场价格，重新计算盈亏和卖出手续费
+    if 'sell_price' in update_data and update_data['sell_price'] is not None:
+        sell_price = update_data['sell_price']
+        shares = update_data.get('shares', trade.shares)
+        buy_price = update_data.get('buy_price', trade.buy_price)
+        
+        # 计算卖出手续费（如果没有提供）
+        if 'sell_commission' not in update_data or update_data['sell_commission'] is None:
+            sell_commission = default_calculator.calculate_sell_commission(
+                sell_price,
+                shares,
+                trade.stock_code
             )
+            update_data['sell_commission'] = sell_commission
+        
+        # 计算盈亏：(卖出价 - 买入价) * 手数 - 总手续费
+        buy_commission = update_data.get('buy_commission', trade.buy_commission) or 0
+        sell_commission = update_data.get('sell_commission', trade.sell_commission) or 0
+        total_commission = buy_commission + sell_commission
+        
+        profit_loss = (sell_price - buy_price) * shares - total_commission
+        update_data['profit_loss'] = round(profit_loss, 2)
+        update_data['commission'] = total_commission  # 更新总手续费
+        
+        # 计算实际风险回报比
+        if trade.stop_loss_price:
+            risk = buy_price - trade.stop_loss_price
+            actual_reward = sell_price - buy_price
+            if risk > 0:
+                update_data['actual_risk_reward_ratio'] = round(actual_reward / risk, 2)
+        
+        # 如果交易已平仓，更新状态
+        if 'status' not in update_data:
+            update_data['status'] = 'closed'
+        
+        logger.info(f"📝 [更新交易] 修改离场价格: {trade.stock_code}, 旧价格: {old_sell_price}, 新价格: {sell_price}, 盈亏: {profit_loss:.2f}")
     
     for field, value in update_data.items():
         if value is not None:
@@ -418,16 +470,19 @@ async def update_trade(
     
     trade.updated_at = datetime.utcnow()
     
-    # 检查手续费、买入价格或股数是否有变化，如果有变化需要重新计算资金曲线
+    # 检查是否有影响资金曲线的字段变化
     commission_changed = trade.commission != old_commission
     price_changed = trade.buy_price != old_buy_price
     shares_changed = trade.shares != old_shares
+    sell_price_changed = trade.sell_price != old_sell_price
+    sell_commission_changed = trade.sell_commission != old_sell_commission
     
     await db.commit()
     await db.refresh(trade)
     
-    # 如果手续费、买入价格或股数有变化，需要重新计算资金曲线
-    if commission_changed or price_changed or shares_changed:
+    # 如果有影响资金曲线的字段变化，需要重新计算资金曲线
+    if commission_changed or price_changed or shares_changed or sell_price_changed or sell_commission_changed:
+        logger.info(f"💰 [更新交易] 检测到影响资金曲线的字段变化，重新计算资金曲线...")
         # 找到用户设置的初始资金日期（最早的 CapitalHistory 记录）
         result = await db.execute(
             select(CapitalHistory)
@@ -440,6 +495,7 @@ async def update_trade(
         if initial_capital_record:
             # 使用初始资金设置的日期作为起点重新计算
             await recalculate_capital_history(db, current_user.id, initial_capital_record.date)
+            logger.info(f"✅ [更新交易] 资金曲线已重新计算")
     
     # 计算风险回报比
     trade_dict = trade.__dict__.copy()

@@ -118,12 +118,14 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
     stock_code: '',
     stock_name: '',
     open_time: getSelectedDateBeijingTime(), // 使用选中日期的北京时间
+    close_time: '',  // 离场时间（用于编辑已平仓交易）
     shares: '',
     risk_per_trade: '',  // 单笔风险（用于自动计算手数）
     commission: '0',
     buy_commission: '',  // 买入手续费，留空自动计算
     sell_commission: '',  // 卖出手续费，留空自动计算
     buy_price: '',
+    sell_price: '',  // 离场价格（用于编辑已平仓交易）
     stop_loss_price: '',
     take_profit_price: '',
     stop_loss_alert: false,
@@ -230,6 +232,12 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       // 将北京时间转换为UTC时间发送给后端
       const utcTimeString = beijingTimeToUTC(formData.open_time);
       
+      // 处理离场时间（如果提供了）
+      let utcCloseTimeString = undefined;
+      if (formData.close_time) {
+        utcCloseTimeString = beijingTimeToUTC(formData.close_time);
+      }
+      
       const data: any = {
         ...formData,
         shares: formData.shares ? parseInt(formData.shares) : undefined,  // 如果提供了手数，使用手数
@@ -238,6 +246,8 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
         buy_commission: formData.buy_commission ? parseFloat(formData.buy_commission) : undefined,  // 买入手续费（留空自动计算）
         sell_commission: formData.sell_commission ? parseFloat(formData.sell_commission) : undefined,  // 卖出手续费（留空自动计算）
         buy_price: parseFloat(formData.buy_price),
+        sell_price: formData.sell_price ? parseFloat(formData.sell_price) : undefined,  // 离场价格（编辑已平仓交易时使用）
+        close_time: utcCloseTimeString,  // 离场时间（编辑已平仓交易时使用）
         stop_loss_price: formData.stop_loss_price ? parseFloat(formData.stop_loss_price) : undefined,
         take_profit_price: formData.take_profit_price ? parseFloat(formData.take_profit_price) : undefined,
         open_time: utcTimeString
@@ -277,17 +287,20 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
     setEditingTrade(trade);
     // 将UTC时间转换为北京时间显示（datetime-local输入框需要北京时间格式）
     const beijingTimeString = utcToBeijingTime(trade.open_time);
+    const beijingCloseTimeString = trade.close_time ? utcToBeijingTime(trade.close_time) : '';
     
     setFormData({
       stock_code: trade.stock_code,
       stock_name: trade.stock_name || '',
       open_time: beijingTimeString,
+      close_time: beijingCloseTimeString,  // 离场时间
       shares: trade.shares.toString(),
       risk_per_trade: '',  // 编辑时不使用单笔风险
       commission: trade.commission.toString(),
       buy_commission: trade.buy_commission?.toString() || '',  // 买入手续费
       sell_commission: trade.sell_commission?.toString() || '',  // 卖出手续费
       buy_price: trade.buy_price.toString(),
+      sell_price: trade.sell_price?.toString() || '',  // 离场价格
       stop_loss_price: trade.stop_loss_price?.toString() || '',
       take_profit_price: trade.take_profit_price?.toString() || '',
       stop_loss_alert: trade.stop_loss_alert,
@@ -664,6 +677,34 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
                 required
               />
             </div>
+            {/* 编辑已平仓交易时显示离场价格和离场时间 */}
+            {editingTrade && editingTrade.status === 'closed' && (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-jojo-gold mb-1">
+                    离场价格
+                    <span className="text-xs text-gray-400 ml-1">(修改后会自动重新计算盈亏和资金)</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={formData.sell_price}
+                    onChange={(e) => setFormData({ ...formData, sell_price: e.target.value })}
+                    className="jojo-input"
+                    placeholder="例如：15.50"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-jojo-gold mb-1">离场时间</label>
+                  <input
+                    type="datetime-local"
+                    value={formData.close_time}
+                    onChange={(e) => setFormData({ ...formData, close_time: e.target.value })}
+                    className="jojo-input"
+                  />
+                </div>
+              </>
+            )}
             <div>
               <label className="block text-sm font-medium text-jojo-gold mb-1">止损价格</label>
               <input
