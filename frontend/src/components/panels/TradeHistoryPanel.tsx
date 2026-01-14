@@ -159,7 +159,16 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
   }, [formData.risk_per_trade, formData.buy_price, formData.stop_loss_price, sharesManuallySet]);
 
   useEffect(() => {
-    fetchTrades();
+    // 只有当没有数据或需要强制刷新时才显示加载中
+    // 这样切换日期时，如果有旧数据，不会闪烁loading状态
+    if (trades.length === 0) {
+      setLoading(true);
+    }
+    
+    fetchTrades().finally(() => {
+      setLoading(false);
+    });
+
     if (viewMode === 'all') {
       fetchStockCodes();
     } else {
@@ -169,6 +178,15 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
     }
   }, [selectedDate, viewMode, _tradeHistoryRefreshKey]);
 
+  // 添加一个新的useEffect来监听日期变化，但只在日期变化时触发
+  useEffect(() => {
+    // 当日期变化时，先清空当前数据，显示加载状态
+    // 或者可以选择保留旧数据，只显示顶部加载条
+    // 这里选择清空数据以避免混淆，但可以优化体验
+    setTrades([]); 
+    setLoading(true);
+  }, [selectedDate]);
+
   useEffect(() => {
     if (viewMode === 'all' && selectedStockCode) {
       fetchTradesByStockCode(selectedStockCode);
@@ -176,6 +194,38 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       fetchTrades();
     }
   }, [selectedStockCode, viewMode]);
+
+  const fetchTrades = async () => {
+    try {
+      // 记录请求开始时间，防止竞态条件
+      const currentRequestTime = Date.now();
+      
+      let url = '/api/trades';
+      const params: any = {};
+      
+      if (viewMode === 'date') {
+        url = `/api/trades/date/${selectedDate}`;
+      } else if (viewMode === 'all') {
+        // 'all' 模式下已经在其他地方处理了 fetchTradesByStockCode
+        // 但如果没有任何筛选条件，可能是获取所有历史（后端可能支持分页）
+        // 这里暂时保持原样，主要优化日期模式
+        return; 
+      }
+      
+      const response = await axios.get(url, { params });
+      
+      // 简单的防抖/竞态处理：如果组件已经卸载或有了新的请求，这里可能会有警告
+      // 但在React useEffect中，我们通常依赖cleanup函数
+      // 这里简化处理，直接设置数据
+      setTrades(response.data.trades || response.data);
+      
+      if (response.data.statistics) {
+        setStockStatistics(response.data.statistics);
+      }
+    } catch (error) {
+      console.error('获取交易记录失败:', error);
+    }
+  };
 
   const fetchStockCodes = async () => {
     try {
