@@ -98,192 +98,224 @@ class PriceMonitor:
         else:
             return code
     
-    async def fetch_stock_info_sina(self, stock_code: str) -> tuple[Optional[float], Optional[str], str]:
-        """使用新浪财经API获取A股价格和名称（免费）
-        返回: (价格, 名称, 来源)"""
+    async def fetch_stock_info_sina_batch(self, stock_codes: list[str]) -> Dict[str, tuple[float, str, str]]:
+        """批量获取新浪财经API股票价格
+        返回: {stock_code: (price, name, source)}"""
+        if not stock_codes:
+            return {}
+            
         start_time = time.time()
         try:
-            normalized_code = self._normalize_stock_code(stock_code)
-            url = f"http://hq.sinajs.cn/list={normalized_code}"
+            # 标准化所有代码
+            normalized_codes = [self._normalize_stock_code(code) for code in stock_codes]
+            # 新浪API支持批量，用逗号分隔: list=sh600000,sz000001
+            codes_str = ",".join(normalized_codes)
+            url = f"http://hq.sinajs.cn/list={codes_str}"
             
-            # 使用HTTP连接器，避免SSL问题
+            # 映射 normalized_code -> original_code
+            code_map = {norm: orig for norm, orig in zip(normalized_codes, stock_codes)}
+            
             connector = aiohttp.TCPConnector(ssl=False)
             async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=2)) as resp:  # 减少超时到2秒
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as resp:
                     if resp.status == 200:
                         text = await resp.text()
-                        # 新浪API返回格式：var hq_str_sh600879="航天电子,15.50,15.60,15.55,15.56,..."
-                        # 数据格式：股票名称,今日开盘价,昨日收盘价,当前价格,今日最高价,今日最低价,...
-                        if text and '=' in text:
-                            data_str = text.split('=')[1].strip().strip('"')
-                            if data_str and ',' in data_str:
-                                parts = data_str.split(',')
-                                if len(parts) >= 4:
-                                    # parts[0] 是股票名称
-                                    # parts[3] 是当前价格（实时价格）
-                                    stock_name = parts[0].strip()
-                                    try:
-                                        price = float(parts[3])
-                                        if price > 0:  # 确保价格有效
-                                            response_time = time.time() - start_time
-                                            api_performance.record("新浪财经", response_time, True)
-                                            logger.debug(f"新浪API返回 {stock_code}: 名称={stock_name}, 价格={price}, 延迟={response_time*1000:.1f}ms")
-                                            return (round(price, 2), stock_name, "新浪财经")
-                                        else:
-                                            logger.warning(f"新浪API返回 {stock_code} 价格无效: {price}")
-                                    except (ValueError, IndexError) as e:
-                                        logger.error(f"解析新浪API价格失败 {stock_code}: {e}, parts={parts[:10]}")
-            response_time = time.time() - start_time
-            api_performance.record("新浪财经", response_time, False)
-            return (None, None, "新浪财经")
+                        # 解析结果
+                        # 格式: var hq_str_sh600879="...";\nvar hq_str_sz000001="...";
+                        results = {}
+                        lines = text.split('\n')
+                        for line in lines:
+                            if 'hq_str_' in line and '=' in line:
+                                try:
+                                    # 提取代码: var hq_str_sh600879=... -> sh600879
+                                    norm_code = line.split('hq_str_')[1].split('=')[0]
+                                    if norm_code in code_map:
+                                        orig_code = code_map[norm_code]
+                                        data_str = line.split('=')[1].strip().strip('";')
+                                        if data_str and ',' in data_str:
+                                            parts = data_str.split(',')
+                                            if len(parts) >= 4:
+                                                stock_name = parts[0].strip()
+                                                price = float(parts[3])
+                                                if price > 0:
+                                                    results[orig_code] = (round(price, 2), stock_name, "新浪财经")
+                                except Exception as e:
+                                    continue
+                        
+                        response_time = time.time() - start_time
+                        api_performance.record("新浪财经(批量)", response_time, True)
+                        return results
+            
+            api_performance.record("新浪财经(批量)", time.time() - start_time, False)
+            return {}
         except Exception as e:
-            response_time = time.time() - start_time
-            api_performance.record("新浪财经", response_time, False)
-            logger.error(f"从新浪API获取股票 {stock_code} 信息失败: {e}")
-            return (None, None, "新浪财经")
-    
-    async def fetch_stock_price_sina(self, stock_code: str) -> tuple[Optional[float], str]:
-        """使用新浪财经API获取A股价格（免费）
-        返回: (价格, 来源)"""
-        price, _, source = await self.fetch_stock_info_sina(stock_code)
-        return (price, source)
-    
-    async def fetch_stock_info_tencent(self, stock_code: str) -> tuple[Optional[float], Optional[str], str]:
-        """使用腾讯财经API获取A股价格和名称（备用方案）
-        返回: (价格, 名称, 来源)"""
+            logger.error(f"批量获取新浪API失败: {e}")
+            api_performance.record("新浪财经(批量)", time.time() - start_time, False)
+            return {}
+
+    async def fetch_stock_info_tencent_batch(self, stock_codes: list[str]) -> Dict[str, tuple[float, str, str]]:
+        """批量获取腾讯财经API股票价格
+        返回: {stock_code: (price, name, source)}"""
+        if not stock_codes:
+            return {}
+            
         start_time = time.time()
         try:
-            normalized_code = self._normalize_stock_code(stock_code)
-            # 腾讯API格式：使用HTTP避免SSL证书问题
-            url = f"http://qt.gtimg.cn/q={normalized_code}"
+            # 标准化所有代码
+            normalized_codes = [self._normalize_stock_code(code) for code in stock_codes]
+            # 腾讯API格式: q=sh600000,sz000001
+            codes_str = ",".join(normalized_codes)
+            url = f"http://qt.gtimg.cn/q={codes_str}"
             
-            # 使用HTTP连接器，避免SSL问题
+            # 映射 normalized_code -> original_code
+            code_map = {norm: orig for norm, orig in zip(normalized_codes, stock_codes)}
+            
             connector = aiohttp.TCPConnector(ssl=False)
             async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=2)) as resp:  # 减少超时到2秒
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as resp:
                     if resp.status == 200:
                         text = await resp.text()
-                        # 腾讯API返回格式：v_sh600879="航天电子~15.50~15.60~..."
-                        if text and '=' in text:
-                            data_str = text.split('=')[1].strip().strip('"')
-                            if data_str and '~' in data_str:
-                                parts = data_str.split('~')
-                                if len(parts) >= 4:
-                                    # parts[1] 是股票名称
-                                    # parts[3] 是当前价格
-                                    stock_name = parts[1].strip()
-                                    price = float(parts[3])
-                                    response_time = time.time() - start_time
-                                    api_performance.record("腾讯财经", response_time, True)
-                                    logger.debug(f"腾讯API返回 {stock_code}: 名称={stock_name}, 价格={price}, 延迟={response_time*1000:.1f}ms")
-                                    return (round(price, 2), stock_name, "腾讯财经")
-            response_time = time.time() - start_time
-            api_performance.record("腾讯财经", response_time, False)
-            return (None, None, "腾讯财经")
+                        results = {}
+                        # 腾讯可能一行返回一个，也可能多行
+                        lines = text.split(';')
+                        for line in lines:
+                            if 'v_' in line and '=' in line:
+                                try:
+                                    # v_sh600879="...";
+                                    norm_code = line.split('v_')[1].split('=')[0]
+                                    if norm_code in code_map:
+                                        orig_code = code_map[norm_code]
+                                        data_str = line.split('=')[1].strip().strip('"')
+                                        if data_str and '~' in data_str:
+                                            parts = data_str.split('~')
+                                            if len(parts) >= 4:
+                                                stock_name = parts[1].strip()
+                                                price = float(parts[3])
+                                                results[orig_code] = (round(price, 2), stock_name, "腾讯财经")
+                                except Exception as e:
+                                    continue
+                        
+                        response_time = time.time() - start_time
+                        api_performance.record("腾讯财经(批量)", response_time, True)
+                        return results
+            
+            api_performance.record("腾讯财经(批量)", time.time() - start_time, False)
+            return {}
         except Exception as e:
-            response_time = time.time() - start_time
-            api_performance.record("腾讯财经", response_time, False)
-            logger.error(f"从腾讯API获取股票 {stock_code} 信息失败: {e}")
-            return (None, None, "腾讯财经")
-    
-    async def fetch_stock_price_tencent(self, stock_code: str) -> tuple[Optional[float], str]:
-        """使用腾讯财经API获取A股价格（备用方案）
-        返回: (价格, 来源)"""
-        price, _, source = await self.fetch_stock_info_tencent(stock_code)
-        return (price, source)
-    
+            logger.error(f"批量获取腾讯API失败: {e}")
+            api_performance.record("腾讯财经(批量)", time.time() - start_time, False)
+            return {}
+
+    def is_trading_time(self) -> bool:
+        """检查是否在交易时间 (9:10-11:35, 12:55-15:05)"""
+        now = datetime.now()
+        # 周末不交易
+        if now.weekday() >= 5:
+            return False
+            
+        current_time = now.time()
+        
+        # 上午盘 (含集合竞价)
+        morning_start = time.strptime("09:10:00", "%H:%M:%S")
+        morning_end = time.strptime("11:35:00", "%H:%M:%S")
+        
+        # 下午盘
+        afternoon_start = time.strptime("12:55:00", "%H:%M:%S")
+        afternoon_end = time.strptime("15:05:00", "%H:%M:%S")
+        
+        # 将当前时间转换为 struct_time 进行比较
+        curr = time.strptime(current_time.strftime("%H:%M:%S"), "%H:%M:%S")
+        
+        return (curr >= morning_start and curr <= morning_end) or \
+               (curr >= afternoon_start and curr <= afternoon_end)
+
     async def fetch_stock_name(self, stock_code: str) -> Optional[str]:
         """获取股票名称
         返回: 股票名称，如果失败返回None"""
         try:
             # 尝试从新浪API获取
-            _, name, _ = await self.fetch_stock_info_sina(stock_code)
-            if name:
-                return name
+            results = await self.fetch_stock_info_sina_batch([stock_code])
+            if stock_code in results:
+                return results[stock_code][1]
             
             # 如果失败，尝试腾讯API
-            _, name, _ = await self.fetch_stock_info_tencent(stock_code)
-            if name:
-                return name
+            results = await self.fetch_stock_info_tencent_batch([stock_code])
+            if stock_code in results:
+                return results[stock_code][1]
             
             return None
         except Exception as e:
             logger.error(f"获取股票 {stock_code} 名称失败: {e}")
             return None
-    
+
     async def fetch_stock_price(self, stock_code: str, force_refresh: bool = False) -> tuple[float, str]:
         """获取股票价格（带缓存和重试机制）
         返回: (价格, 来源)
         force_refresh: 是否强制刷新，忽略缓存"""
-        # 检查缓存（除非强制刷新）
-        if not force_refresh:
-            if stock_code in self.price_cache:
-                price_data = self.price_cache[stock_code]
-                if isinstance(price_data, tuple) and len(price_data) >= 3:
-                    price, timestamp, source = price_data
-                    if (datetime.utcnow() - timestamp).seconds < self.CACHE_TTL:
-                        return (price, source)
-        
-        # 尝试从新浪API获取
-        price, source = await self.fetch_stock_price_sina(stock_code)
-        
-        # 如果失败，尝试腾讯API
-        if price is None:
-            price, source = await self.fetch_stock_price_tencent(stock_code)
-        
-        # 如果都失败，使用缓存或返回0
-        if price is None:
-            if stock_code in self.price_cache:
-                price_data = self.price_cache[stock_code]
-                if isinstance(price_data, tuple) and len(price_data) >= 3:
-                    cached_price, _, cached_source = price_data
-                    logger.warning(f"获取股票 {stock_code} 价格失败，使用缓存价格")
-                    return (cached_price, cached_source + "(缓存)")
-            logger.warning(f"获取股票 {stock_code} 价格失败，返回0")
-            return (0.0, "获取失败")
-        
-        # 检查价格是否变化
-        old_price = None
-        if stock_code in self.price_cache:
-            old_price_data = self.price_cache[stock_code]
-            if isinstance(old_price_data, tuple) and len(old_price_data) >= 3:
-                old_price = old_price_data[0]
-        
-        # 更新缓存 (价格, 时间戳, 来源)
-        self.price_cache[stock_code] = (price, datetime.utcnow(), source)
-        
-        # 如果价格变化，触发回调（毫秒级推送）
-        if old_price is not None and abs(old_price - price) > 0.001:  # 价格变化超过0.001元
-            logger.debug(f"💰 价格变化 {stock_code}: {old_price:.2f} -> {price:.2f}")
-            for callback in self.price_change_callbacks:
-                try:
-                    callback(stock_code, price, source)
-                except Exception as e:
-                    logger.error(f"价格变化回调执行失败: {e}")
-        
-        logger.debug(f"获取股票 {stock_code} 价格: {price} (来源: {source})")
-        return (price, source)
-    
+        # 兼容旧接口
+        results = await self.batch_fetch_prices([stock_code], force_refresh=force_refresh)
+        if stock_code in results:
+            return (results[stock_code]["price"], results[stock_code]["source"])
+        return (0.0, "获取失败")
+
     async def batch_fetch_prices(self, stock_codes: list[str], force_refresh: bool = False) -> Dict[str, Dict[str, any]]:
-        """批量获取股票价格
+        """批量获取股票价格 (真正实现批量请求)
         返回: {stock_code: {"price": float, "source": str}}"""
-        prices = {}
-        tasks = [self.fetch_stock_price(code, force_refresh=force_refresh) for code in stock_codes]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        if not stock_codes:
+            return {}
+            
+        # 分批处理，每批最多30个，避免URL过长
+        BATCH_SIZE = 30
+        all_results = {}
         
-        for code, result in zip(stock_codes, results):
-            if isinstance(result, Exception):
-                logger.error(f"获取股票 {code} 价格异常: {result}")
-                cached_data = self.price_cache.get(code, (0.0, datetime.utcnow(), "缓存"))
-                prices[code] = {
-                    "price": cached_data[0] if isinstance(cached_data, tuple) else 0.0,
-                    "source": cached_data[2] if isinstance(cached_data, tuple) and len(cached_data) >= 3 else "获取失败"
-                }
-            else:
-                price, source = result
-                prices[code] = {"price": price, "source": source}
+        # 将股票代码分块
+        chunks = [stock_codes[i:i + BATCH_SIZE] for i in range(0, len(stock_codes), BATCH_SIZE)]
         
-        return prices
+        for chunk in chunks:
+            # 1. 尝试新浪批量
+            batch_results = await self.fetch_stock_info_sina_batch(chunk)
+            
+            # 2. 检查哪些失败了，尝试腾讯批量
+            failed_codes = [code for code in chunk if code not in batch_results]
+            if failed_codes:
+                tencent_results = await self.fetch_stock_info_tencent_batch(failed_codes)
+                batch_results.update(tencent_results)
+            
+            # 3. 整理结果，更新缓存
+            for code in chunk:
+                if code in batch_results:
+                    price, _, source = batch_results[code]
+                    
+                    # 检查价格变化并触发回调
+                    old_price = None
+                    if code in self.price_cache:
+                        old_price_data = self.price_cache[code]
+                        if isinstance(old_price_data, tuple) and len(old_price_data) >= 3:
+                            old_price = old_price_data[0]
+                    
+                    # 更新缓存
+                    self.price_cache[code] = (price, datetime.utcnow(), source)
+                    
+                    # 触发回调
+                    if hasattr(self, 'price_change_callbacks') and old_price is not None and abs(old_price - price) > 0.001:
+                        for callback in self.price_change_callbacks:
+                            try:
+                                callback(code, price, source)
+                            except Exception:
+                                pass
+                                
+                    all_results[code] = {"price": price, "source": source}
+                else:
+                    # 获取失败，使用缓存
+                    cached_data = self.price_cache.get(code, (0.0, datetime.utcnow(), "获取失败"))
+                    price = cached_data[0] if isinstance(cached_data, tuple) else 0.0
+                    source = cached_data[2] if isinstance(cached_data, tuple) and len(cached_data) >= 3 else "获取失败"
+                    # 如果不是获取失败，标记为缓存
+                    if source != "获取失败":
+                        source += "(缓存)"
+                    all_results[code] = {"price": price, "source": source}
+                    
+        return all_results
     
     def get_current_price(self, stock_code: str) -> tuple[Optional[float], Optional[str]]:
         """获取当前缓存的价格和来源（同步方法）
