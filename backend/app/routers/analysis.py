@@ -6,9 +6,9 @@ import logging
 import os
 import time
 import json
-from datetime import datetime
+from datetime import datetime, date
 
-from app.database import get_db, Trade, CapitalHistory
+from app.database import get_db, Trade, CapitalHistory, ForexTrade, ForexAccount
 from app.middleware.auth import get_current_user
 from app.models import AnalysisResponse, AnalysisSummary, DetailedAnalysis
 from app.database import User
@@ -77,27 +77,71 @@ logger = logging.getLogger(__name__)
 )
 async def analyze_trades(
     use_ai: bool = False,  # 是否调用AI分析，默认False（只返回统计摘要）
+    system_mode: str = "stock",  # 系统模式：stock 或 forex
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     logger.info(f"🤖 [AI分析] 用户 {current_user.username} 开始交易分析")
     
-    # 获取所有交易记录（排除已删除的记录）
-    result = await db.execute(
-        select(Trade)
-        .where(
-            Trade.user_id == current_user.id,
-            Trade.is_deleted == False  # 排除已删除的记录
+    trades = []
+    capital_history = []
+
+    if system_mode == "forex":
+        # 外汇模式：读取外汇交易与账户初始资金，按关闭日期构造资金曲线
+        result = await db.execute(
+            select(ForexTrade)
+            .where(
+                ForexTrade.user_id == current_user.id,
+                ForexTrade.is_deleted == False
+            )
+            .order_by(ForexTrade.open_time.desc())
         )
-        .order_by(Trade.open_time.desc())
-    )
-    trades = result.scalars().all()
-    
-    # 获取资金历史
-    capital_result = await db.execute(
-        select(CapitalHistory).where(CapitalHistory.user_id == current_user.id).order_by(CapitalHistory.date.asc())
-    )
-    capital_history = capital_result.scalars().all()
+        trades = result.scalars().all()
+
+        acc_result = await db.execute(
+            select(ForexAccount).where(ForexAccount.user_id == current_user.id)
+        )
+        account = acc_result.scalar_one_or_none()
+        if account:
+            anchor_date: date = account.initial_date or datetime.utcnow().date()
+            running = float(account.initial_balance or 0)
+            points_by_date: dict[date, float] = {anchor_date: running}
+
+            closed_result = await db.execute(
+                select(ForexTrade)
+                .where(
+                    ForexTrade.user_id == current_user.id,
+                    ForexTrade.is_deleted == False,
+                    ForexTrade.status == "closed",
+                    ForexTrade.close_time.isnot(None),
+                )
+                .order_by(ForexTrade.close_time.asc())
+            )
+            closed = closed_result.scalars().all()
+            for t in closed:
+                d = t.close_time.date() if t.close_time else anchor_date
+                if d < anchor_date:
+                    continue
+                running += float(t.profit or 0)
+                points_by_date[d] = running
+
+            for d in sorted(points_by_date.keys()):
+                capital_history.append(type("CapitalPoint", (), {"date": d, "capital": points_by_date[d]}))
+    else:
+        # A股模式：保持原逻辑
+        result = await db.execute(
+            select(Trade)
+            .where(
+                Trade.user_id == current_user.id,
+                Trade.is_deleted == False  # 排除已删除的记录
+            )
+            .order_by(Trade.open_time.desc())
+        )
+        trades = result.scalars().all()
+        capital_result = await db.execute(
+            select(CapitalHistory).where(CapitalHistory.user_id == current_user.id).order_by(CapitalHistory.date.asc())
+        )
+        capital_history = capital_result.scalars().all()
     
     if not trades:
         logger.info(f"⚠️ [AI分析] 用户 {current_user.username} 没有交易记录")
@@ -139,36 +183,66 @@ async def analyze_trades(
     # 转换为DataFrame便于分析
     trades_data = []
     for trade in trades:
-        if trade.status == "closed" and trade.sell_price:
-            # 优先使用profit_loss字段，如果没有则计算
-            if trade.profit_loss is not None:
-                profit = trade.profit_loss
-            else:
-                profit = (trade.sell_price - trade.buy_price) * trade.shares - (trade.commission or 0)
-            
-            trades_data.append({
-                "id": trade.id,
-                "stock_code": trade.stock_code,
-                "stock_name": trade.stock_name,
-                "buy_price": trade.buy_price,
-                "sell_price": trade.sell_price,
-                "stop_loss_price": trade.stop_loss_price,
-                "take_profit_price": trade.take_profit_price,
-                "shares": trade.shares,
-                "commission": trade.commission or 0,
-                "buy_commission": trade.buy_commission or 0,
-                "sell_commission": trade.sell_commission or 0,
-                "profit": profit,
-                "profit_loss": trade.profit_loss,  # 保存原始盈亏字段
-                "holding_days": trade.holding_days or 0,
-                "order_result": trade.order_result,
-                "status": trade.status,
-                "open_time": trade.open_time.isoformat() if trade.open_time else None,
-                "close_time": trade.close_time.isoformat() if trade.close_time else None,
-                "notes": trade.notes or "",  # 备注字段（重要：AI需要看到备注）
-                "theoretical_risk_reward_ratio": trade.theoretical_risk_reward_ratio,
-                "actual_risk_reward_ratio": trade.actual_risk_reward_ratio
-            })
+        if system_mode == "forex":
+            if trade.status == "closed" and trade.close_price:
+                profit = float(trade.profit or 0)
+                holding_days = 0
+                if trade.open_time and trade.close_time:
+                    holding_days = max(0, (trade.close_time - trade.open_time).days)
+                trades_data.append({
+                    "id": trade.id,
+                    "stock_code": trade.symbol,  # 复用字段名以兼容AI分析器
+                    "stock_name": trade.symbol,
+                    "buy_price": float(trade.open_price),
+                    "sell_price": float(trade.close_price),
+                    "stop_loss_price": float(trade.sl) if trade.sl is not None else None,
+                    "take_profit_price": float(trade.tp) if trade.tp is not None else None,
+                    "shares": float(trade.lots),  # lots作为数量
+                    "commission": float(trade.commission or 0),
+                    "buy_commission": 0.0,
+                    "sell_commission": float(trade.commission or 0),
+                    "profit": profit,
+                    "profit_loss": profit,
+                    "holding_days": holding_days,
+                    "order_result": None,
+                    "status": trade.status,
+                    "open_time": trade.open_time.isoformat() if trade.open_time else None,
+                    "close_time": trade.close_time.isoformat() if trade.close_time else None,
+                    "notes": trade.notes or "",
+                    "theoretical_risk_reward_ratio": None,
+                    "actual_risk_reward_ratio": None
+                })
+        else:
+            if trade.status == "closed" and trade.sell_price:
+                # 优先使用profit_loss字段，如果没有则计算
+                if trade.profit_loss is not None:
+                    profit = trade.profit_loss
+                else:
+                    profit = (trade.sell_price - trade.buy_price) * trade.shares - (trade.commission or 0)
+                
+                trades_data.append({
+                    "id": trade.id,
+                    "stock_code": trade.stock_code,
+                    "stock_name": trade.stock_name,
+                    "buy_price": trade.buy_price,
+                    "sell_price": trade.sell_price,
+                    "stop_loss_price": trade.stop_loss_price,
+                    "take_profit_price": trade.take_profit_price,
+                    "shares": trade.shares,
+                    "commission": trade.commission or 0,
+                    "buy_commission": trade.buy_commission or 0,
+                    "sell_commission": trade.sell_commission or 0,
+                    "profit": profit,
+                    "profit_loss": trade.profit_loss,  # 保存原始盈亏字段
+                    "holding_days": trade.holding_days or 0,
+                    "order_result": trade.order_result,
+                    "status": trade.status,
+                    "open_time": trade.open_time.isoformat() if trade.open_time else None,
+                    "close_time": trade.close_time.isoformat() if trade.close_time else None,
+                    "notes": trade.notes or "",  # 备注字段（重要：AI需要看到备注）
+                    "theoretical_risk_reward_ratio": trade.theoretical_risk_reward_ratio,
+                    "actual_risk_reward_ratio": trade.actual_risk_reward_ratio
+                })
     
     if not trades_data:
         logger.info(f"⚠️ [AI分析] 用户 {current_user.username} 没有已平仓的交易记录")

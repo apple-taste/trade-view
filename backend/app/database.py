@@ -105,6 +105,51 @@ class Trade(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+class ForexAccount(Base):
+    __tablename__ = "forex_accounts"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=False, unique=True, index=True)
+    currency = Column(String, default="USD")
+    leverage = Column(Integer, default=100)
+    initial_balance = Column(Float, default=10000)
+    initial_date = Column(Date, nullable=True)
+    balance = Column(Float, default=10000)
+    equity = Column(Float, default=10000)
+    margin = Column(Float, default=0)
+    free_margin = Column(Float, default=10000)
+    margin_level = Column(Float, default=0)
+    max_drawdown = Column(Float, default=0)
+    peak_equity = Column(Float, default=10000)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class ForexTrade(Base):
+    __tablename__ = "forex_trades"
+    __table_args__ = (
+        Index('idx_forex_user_open_time', 'user_id', 'is_deleted', 'open_time'),
+    )
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    symbol = Column(String, nullable=False)
+    side = Column(String, nullable=False)  # BUY | SELL
+    lots = Column(Float, nullable=False)
+    open_time = Column(DateTime, nullable=False, index=True)
+    close_time = Column(DateTime)
+    open_price = Column(Float, nullable=False)
+    close_price = Column(Float)
+    sl = Column(Float)
+    tp = Column(Float)
+    commission = Column(Float, default=0)
+    swap = Column(Float, default=0)
+    profit = Column(Float)
+    notes = Column(Text)
+    status = Column(String, default="open", index=True)
+    is_deleted = Column(Boolean, default=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 async def get_db():
     async with AsyncSessionLocal() as session:
         yield session
@@ -112,3 +157,18 @@ async def get_db():
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        if DB_TYPE == "SQLite":
+            result = await conn.exec_driver_sql("PRAGMA table_info(forex_accounts)")
+            cols = [row[1] for row in result.fetchall()]
+            if "initial_balance" not in cols:
+                await conn.exec_driver_sql(
+                    "ALTER TABLE forex_accounts ADD COLUMN initial_balance FLOAT DEFAULT 10000"
+                )
+                await conn.exec_driver_sql(
+                    "UPDATE forex_accounts SET initial_balance = COALESCE(initial_balance, balance, 10000)"
+                )
+            if "initial_date" not in cols:
+                await conn.exec_driver_sql("ALTER TABLE forex_accounts ADD COLUMN initial_date DATE")
+                await conn.exec_driver_sql(
+                    "UPDATE forex_accounts SET initial_date = COALESCE(initial_date, DATE(created_at), DATE('now'))"
+                )

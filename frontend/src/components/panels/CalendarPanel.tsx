@@ -7,9 +7,11 @@ import { useTrade } from '../../contexts/TradeContext';
 interface CalendarPanelProps {
   selectedDate: string;
   onDateChange: (date: string) => void;
+  apiBase?: string; // 默认 /api/trades，可传 /api/forex/trades
+  refreshKey?: number;
 }
 
-export default function CalendarPanel({ selectedDate, onDateChange }: CalendarPanelProps) {
+export default function CalendarPanel({ selectedDate, onDateChange, apiBase = '/api/trades', refreshKey }: CalendarPanelProps) {
   const [currentMonth, setCurrentMonth] = useState(new Date(selectedDate));
   const [tradeDates, setTradeDates] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -17,7 +19,7 @@ export default function CalendarPanel({ selectedDate, onDateChange }: CalendarPa
 
   useEffect(() => {
     fetchTradeDates();
-  }, [_calendarRefreshKey]); // 当refresh key变化时刷新
+  }, [_calendarRefreshKey, refreshKey]); // 当refresh key变化时刷新
 
   useEffect(() => {
     // 当selectedDate改变时，更新currentMonth
@@ -27,7 +29,7 @@ export default function CalendarPanel({ selectedDate, onDateChange }: CalendarPa
   const fetchTradeDates = async () => {
     setLoading(true);
     try {
-      const response = await axios.get('/api/trades/dates');
+      const response = await axios.get(`${apiBase}/dates`);
       setTradeDates(new Set(response.data));
     } catch (error) {
       console.error('获取交易日期失败:', error);
@@ -90,9 +92,9 @@ export default function CalendarPanel({ selectedDate, onDateChange }: CalendarPa
   }
 
   return (
-    <div className="jojo-card p-3">
+    <div className="jojo-card p-3 h-full flex flex-col">
       {/* 月份导航 */}
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-2 flex-none">
         <button
           onClick={handlePrevMonth}
           className="jojo-button p-1"
@@ -119,7 +121,7 @@ export default function CalendarPanel({ selectedDate, onDateChange }: CalendarPa
       </div>
 
       {/* 星期标题 */}
-      <div className="grid grid-cols-7 gap-0.5 mb-1">
+      <div className="grid grid-cols-7 gap-0.5 mb-1 flex-none">
         {['一', '二', '三', '四', '五', '六', '日'].map((day, index) => (
           <div
             key={index}
@@ -130,8 +132,8 @@ export default function CalendarPanel({ selectedDate, onDateChange }: CalendarPa
         ))}
       </div>
 
-      {/* 日期网格 */}
-      <div className="grid grid-cols-7 gap-0.5">
+      {/* 日期网格 - 填充剩余空间 */}
+      <div className="grid grid-cols-7 gap-0.5 flex-grow auto-rows-fr min-h-0">
         {days.map((day, index) => {
           const isCurrentMonth = isSameMonth(day, currentMonth);
           const hasTrade = isTradeDate(day);
@@ -143,7 +145,7 @@ export default function CalendarPanel({ selectedDate, onDateChange }: CalendarPa
               key={index}
               onClick={() => handleDateClick(day)}
               className={`
-                relative p-1 rounded transition-all duration-200 min-h-[2rem]
+                relative p-1 rounded transition-all duration-200 flex flex-col items-center justify-center
                 ${!isCurrentMonth ? 'text-gray-600 opacity-50' : 'text-white'}
                 ${isSelectedDate 
                   ? 'bg-jojo-gold text-jojo-blue font-bold scale-105 shadow-lg' 
@@ -155,9 +157,9 @@ export default function CalendarPanel({ selectedDate, onDateChange }: CalendarPa
                 }
               `}
             >
-              <span className="block text-xs font-semibold">{format(day, 'd')}</span>
+              <span className="block text-sm font-semibold mb-1">{format(day, 'd')}</span>
               {hasTrade && (
-                <span className="absolute bottom-0 left-1/2 transform -translate-x-1/2 text-xs" title="有交易记录">
+                <span className="text-sm animate-bounce" title="有交易记录">
                   {getTradeEmoji(day)}
                 </span>
               )}
@@ -166,32 +168,32 @@ export default function CalendarPanel({ selectedDate, onDateChange }: CalendarPa
         })}
       </div>
 
-      {/* 选中日期信息 */}
-      <div className="mt-2 p-2 bg-jojo-blue-light rounded border border-jojo-gold">
-        <p className="text-xs text-jojo-gold mb-0.5">
-          当前选择日期:
-        </p>
-        <p className="text-sm font-bold text-white">
-          {format(new Date(selectedDate), 'yyyy年MM月dd日')}
-        </p>
-        {isTradeDate(new Date(selectedDate)) && (
-          <p className="text-xs text-jojo-gold mt-1 flex items-center space-x-1">
-            <span>📈</span>
-            <span>该日期有交易记录</span>
-          </p>
-        )}
-      </div>
-
-      {/* 图例 */}
-      <div className="mt-2 flex items-center justify-center space-x-2 text-xs text-gray-400">
-        <div className="flex items-center space-x-1">
-          <span className="text-xs">📈</span>
-          <span>有交易</span>
-        </div>
-        <div className="flex items-center space-x-1">
-          <div className="w-1.5 h-1.5 border border-jojo-gold rounded-full"></div>
-          <span>今天</span>
-        </div>
+      {/* 底部信息栏 */}
+      <div className="flex-none mt-2 flex items-center justify-between">
+         {/* 选中日期信息 */}
+         <div className="flex items-center space-x-2">
+            <span className="text-xs text-gray-400">已选:</span>
+            <span className="text-sm font-bold text-jojo-gold">
+              {format(new Date(selectedDate), 'yyyy-MM-dd')}
+            </span>
+            {isTradeDate(new Date(selectedDate)) && (
+              <span className="text-xs bg-jojo-blue-light px-1.5 py-0.5 rounded text-jojo-gold flex items-center">
+                <span className="mr-1">📈</span>有交易
+              </span>
+            )}
+         </div>
+         
+         {/* 简易图例 */}
+         <div className="flex items-center space-x-2 text-xs text-gray-400">
+            <div className="flex items-center space-x-1">
+               <span className="text-xs">📈</span>
+               <span>交易日</span>
+            </div>
+            <div className="flex items-center space-x-1">
+               <div className="w-1.5 h-1.5 border border-jojo-gold rounded-full"></div>
+               <span>今天</span>
+            </div>
+         </div>
       </div>
     </div>
   );

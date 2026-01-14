@@ -420,15 +420,15 @@ export default function PositionPanel() {
 
   if (loading) {
     return (
-      <div className="jojo-card p-6 text-center">
+      <div className="jojo-card p-6 text-center h-full flex flex-col justify-center">
         <div className="text-jojo-gold animate-jojo-pulse">加载中...</div>
       </div>
     );
   }
 
   return (
-    <div ref={panelRef} className="jojo-card p-3">
-      <div className="flex justify-between items-center mb-2">
+    <div ref={panelRef} className="jojo-card p-3 h-full flex flex-col min-h-0">
+      <div className="flex justify-between items-center mb-2 flex-none">
         <h2 className="jojo-title text-lg">持仓</h2>
         <button
           onClick={() => refreshPrices(true)}
@@ -450,11 +450,11 @@ export default function PositionPanel() {
       </div>
 
       {positions.length === 0 ? (
-        <div className="text-center py-4 text-gray-400 text-sm">
+        <div className="flex-1 min-h-0 flex items-center justify-center text-gray-400 text-sm">
           当前无持仓
         </div>
       ) : (
-        <div className="space-y-2 max-h-[500px] overflow-y-auto custom-scrollbar">
+        <div className="space-y-2 flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-1">
           {positions.map((position) => {
             const profit = calculateProfit(position);
             const profitPercent = profit ? ((position.current_price! - position.buy_price) / position.buy_price * 100) : null;

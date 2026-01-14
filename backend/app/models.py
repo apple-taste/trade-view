@@ -182,3 +182,97 @@ class DetailedAnalysis(BaseModel):
 class AnalysisResponse(BaseModel):
     summary: AnalysisSummary
     detailed_analysis: Optional[DetailedAnalysis] = None  # AI详细分析
+
+class ForexAccountUpdate(BaseModel):
+    currency: Optional[str] = None
+    leverage: Optional[int] = None
+    balance: Optional[float] = None
+
+class ForexAccountReset(BaseModel):
+    balance: float
+    date: Optional[date] = None
+    currency: Optional[str] = None
+    leverage: Optional[int] = None
+
+class ForexAccountInitialUpdate(BaseModel):
+    initial_balance: float
+    initial_date: Optional[date] = None
+
+class ForexAccountResponse(BaseModel):
+    user_id: int
+    currency: str
+    leverage: int
+    initial_balance: float
+    initial_date: Optional[date] = None
+    balance: float
+    equity: float
+    margin: float
+    free_margin: float
+    margin_level: float
+    max_drawdown: float
+    peak_equity: float
+    updated_at: datetime
+
+class ForexTradeCreate(BaseModel):
+    symbol: str
+    side: str
+    lots: float
+    open_time: Optional[datetime] = None
+    open_price: float
+    sl: Optional[float] = None
+    tp: Optional[float] = None
+    commission: Optional[float] = 0
+    swap: Optional[float] = 0
+    notes: Optional[str] = None
+
+class ForexTradeUpdate(BaseModel):
+    sl: Optional[float] = None
+    tp: Optional[float] = None
+    notes: Optional[str] = None
+
+class ForexTradeClose(BaseModel):
+    close_time: Optional[datetime] = None
+    close_price: float
+    swap: Optional[float] = None
+    commission: Optional[float] = None
+
+class ForexTradeResponse(BaseModel):
+    id: int
+    user_id: int
+    symbol: str
+    side: str
+    lots: float
+    open_time: datetime
+    close_time: Optional[datetime]
+    open_price: float
+    close_price: Optional[float]
+    sl: Optional[float]
+    tp: Optional[float]
+    commission: float
+    swap: float
+    profit: Optional[float]
+    notes: Optional[str]
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+class ForexPaginatedTradeResponse(BaseModel):
+    items: List[ForexTradeResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+class ForexCapitalPoint(BaseModel):
+    date: date
+    equity: float
+    balance: float
+
+class ForexQuoteResponse(BaseModel):
+    symbol: str
+    price: Optional[float] = None
+    bid: Optional[float] = None
+    ask: Optional[float] = None
+    asof: datetime
+    source: str
+    error: Optional[str] = None

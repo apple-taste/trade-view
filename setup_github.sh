@@ -63,6 +63,10 @@ fi
 
 echo ""
 echo "🔧 配置Git remote..."
+git init
+git add .
+git commit -m "Update for deployment" 2>/dev/null || echo "Nothing to commit"
+git branch -M main
 git remote remove origin 2>/dev/null || true
 git remote add origin "https://${TOKEN}@github.com/$REPO_OWNER/$REPO_NAME.git"
 
@@ -74,11 +78,19 @@ git push -u origin main
 
 echo ""
 echo "=================================================================================="
-echo "✅ 完成！"
+echo "🚀 开始部署流程"
 echo "=================================================================================="
+
+if [ -f "./deploy.sh" ]; then
+    echo "� 检测到 deploy.sh，正在执行部署..."
+    chmod +x ./deploy.sh
+    ./deploy.sh
+else
+    echo "⚠️ 未找到 deploy.sh，跳过自动部署。"
+    echo "请手动运行部署命令或检查 deploy.sh 文件是否存在。"
+fi
+
 echo ""
-echo "📋 仓库信息："
-echo "   URL: https://github.com/$REPO_OWNER/$REPO_NAME"
-echo ""
-echo "🚀 下一步：使用MCP部署API进行部署"
-echo ""
+echo "=================================================================================="
+echo "✅ 所有操作完成！"
+echo "=================================================================================="

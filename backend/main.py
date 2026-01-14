@@ -13,7 +13,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from app.database import init_db
-from app.routers import auth, user, trades, positions, analysis, price
+from app.routers import auth, user, trades, positions, analysis, price, forex
 from app.services.price_monitor import price_monitor
 from app.services.alert_monitor import alert_monitor
 
@@ -292,6 +292,7 @@ app.include_router(trades.router, prefix="/api/trades", tags=["交易记录"])
 app.include_router(positions.router, prefix="/api/positions", tags=["持仓"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["AI分析"])
 app.include_router(price.router, prefix="/api/price", tags=["价格"])
+app.include_router(forex.router, prefix="/api/forex", tags=["外汇"])
 logger.info("✅ 路由注册完成")
 
 @app.get("/")
