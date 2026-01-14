@@ -3,8 +3,24 @@
 # 部署检查和日志查看脚本
 # 使用方法: ./check-deployment.sh
 
-TOKEN="sk_cb7877e7_e4382f5e748e92cdd707b6f937e8cc8a5c2a"
-SERVICE_NAME="trade-view"
+# 从.env文件加载配置
+if [ ! -f .env ]; then
+    echo "❌ 错误: .env文件不存在"
+    echo "💡 提示: 请先运行 ./setup-env.sh 创建.env文件"
+    exit 1
+fi
+
+export $(cat .env | grep -v '^#' | xargs)
+
+# 检查必要的环境变量
+if [ -z "$DEPLOY_TOKEN" ]; then
+    echo "❌ 错误: DEPLOY_TOKEN未设置"
+    echo "💡 提示: 请在.env文件中设置DEPLOY_TOKEN"
+    exit 1
+fi
+
+TOKEN="$DEPLOY_TOKEN"
+SERVICE_NAME="${GITHUB_REPO_NAME:-trade-view}"
 BASE_URL="https://space.ai-builders.com/backend/v1"
 
 echo "🔍 检查部署状态..."
