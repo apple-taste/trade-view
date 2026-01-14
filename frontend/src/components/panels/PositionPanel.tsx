@@ -29,6 +29,7 @@ export default function PositionPanel() {
   const [refreshing, setRefreshing] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const refreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const autoRefreshingRef = useRef(false);
   const alertedPositionsRef = useRef<Set<string>>(new Set()); // 记录已提醒的持仓，避免重复提醒
   const panelRef = useRef<HTMLDivElement>(null);
   const { 
@@ -186,6 +187,11 @@ export default function PositionPanel() {
   };
 
   const refreshPrices = async (forceRefresh: boolean = true, silent: boolean = false) => {
+    if (silent) {
+      if (autoRefreshingRef.current) return;
+      autoRefreshingRef.current = true;
+    }
+    
     if (positions.length === 0) return;
     
     // 锁定面板高度以防止抖动
@@ -238,9 +244,10 @@ export default function PositionPanel() {
       console.error('刷新价格失败:', error);
     } finally {
       if (!silent) setRefreshing(false);
-      // 解锁面板高度
+      if (silent) {
+        autoRefreshingRef.current = false;
+      }
       if (panelRef.current && !silent) {
-        // 稍微延迟解锁，确保渲染完成
         setTimeout(() => {
           if (panelRef.current) panelRef.current.style.minHeight = '';
         }, 100);

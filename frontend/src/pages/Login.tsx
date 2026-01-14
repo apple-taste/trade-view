@@ -119,10 +119,10 @@ export default function Login() {
               letterSpacing: '0.1em',
             }}
           >
-            {isLogin ? '✨ 黄金冒险 ✨' : '🌟 加入冒险 🌟'}
+            交易管理系统
           </h2>
           <p className="text-yellow-200 mt-2 text-sm tracking-wide" style={{ textShadow: '0 0 10px rgba(255, 215, 0, 0.3)' }}>
-            {isLogin ? 'A股交易管理系统' : '开启你的交易之旅'}
+            专注你的交易管理
           </p>
         </div>
 
