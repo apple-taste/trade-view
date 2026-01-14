@@ -57,19 +57,20 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* 中间区域：持仓 + 日历 + 交易历史 */}
+      {/* 中间区域：交易历史 (独占一行) */}
+      <div className="grid grid-cols-1 gap-2">
+        <TradeHistoryPanel selectedDate={selectedDate} />
+      </div>
+
+      {/* 底部区域：日历 + 持仓 */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-2">
-        {/* 左侧：持仓面板 - 增加空间 */}
-        <div className="lg:col-span-5">
-          <PositionPanel />
-        </div>
-        {/* 中间：日历面板 - 减少空间 */}
-        <div className="lg:col-span-2">
+        {/* 左侧：日历面板 */}
+        <div className="lg:col-span-3">
           <CalendarPanel selectedDate={selectedDate} onDateChange={setSelectedDate} />
         </div>
-        {/* 右侧：交易历史面板 - 增加空间 */}
-        <div className="lg:col-span-5">
-          <TradeHistoryPanel selectedDate={selectedDate} />
+        {/* 右侧：持仓面板 */}
+        <div className="lg:col-span-9">
+          <PositionPanel />
         </div>
       </div>
 
