@@ -309,8 +309,16 @@ class PriceMonitor:
     
     async def update_prices_loop(self):
         """价格更新循环（毫秒级实时更新）"""
+        logger.info(f"启动价格监控循环，间隔: {self.update_interval}s")
         while self.running:
             try:
+                # 检查交易时间
+                if not self.is_trading_time():
+                    # 非交易时间，大幅降低频率（例如10秒一次，或者完全停止）
+                    # 为了用户体验（可能在非交易时间查看），保持低频更新
+                    await asyncio.sleep(5)
+                    continue
+
                 # 收集所有需要监控的股票代码
                 all_stock_codes = set()
                 for stock_codes in self.subscriptions.values():
@@ -319,9 +327,10 @@ class PriceMonitor:
                 if all_stock_codes:
                     # 批量获取价格（强制刷新，忽略缓存，实现毫秒级实时性）
                     prices = await self.batch_fetch_prices(list(all_stock_codes), force_refresh=True)
-                    logger.debug(f"更新价格: {prices}")
+                    # 仅在有价格变化或特定条件下打日志，避免日志爆炸
+                    # logger.debug(f"更新价格: {len(prices)} 只股票")
                 
-                # 使用更短的间隔（500ms）实现毫秒级实时性
+                # 使用设定的间隔
                 await asyncio.sleep(self.update_interval)
             except asyncio.CancelledError:
                 break
