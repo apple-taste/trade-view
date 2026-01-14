@@ -15,7 +15,7 @@ export default function Dashboard() {
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
 
   return (
-    <div className="min-h-screen p-2 space-y-2 overflow-hidden">
+    <div className="h-screen p-2 flex flex-col overflow-hidden bg-gray-900">
       {/* 价格提醒面板 - 固定在顶部 */}
       {alerts.length > 0 && (
         <AlertPanel
@@ -25,8 +25,8 @@ export default function Dashboard() {
         />
       )}
 
-      {/* 顶部导航栏 */}
-      <nav className="jojo-card p-2">
+      {/* 顶部导航栏 - 固定高度 */}
+      <nav className="jojo-card p-2 mb-2 flex-none">
         <div className="flex justify-between items-center">
           <div className="flex items-center space-x-2">
             <h1 className="jojo-title text-2xl">JOJOLAND 交易系统</h1>
@@ -45,38 +45,40 @@ export default function Dashboard() {
         </div>
       </nav>
 
-      {/* 顶部区域：账户 + 资金曲线 */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-2">
-        {/* 左侧：账户面板 */}
-        <div className="lg:col-span-1">
-          <UserPanel compact={true} />
+      {/* 主要内容区域 - 自动填充剩余高度 */}
+      <div className="flex-grow grid grid-cols-1 lg:grid-cols-12 gap-2 min-h-0">
+        {/* 左侧：日历 + 持仓 (同列上下排列) */}
+        <div className="lg:col-span-4 h-full flex flex-col min-h-0 space-y-2 overflow-y-auto custom-scrollbar pr-1">
+          <div>
+            <CalendarPanel selectedDate={selectedDate} onDateChange={setSelectedDate} />
+          </div>
+          <div className="flex-1 min-h-0">
+            <PositionPanel />
+          </div>
         </div>
-        {/* 右侧：资金成长曲线 */}
-        <div className="lg:col-span-2">
-          <UserPanel showChart={true} />
-        </div>
-      </div>
 
-      {/* 中间区域：交易历史 (独占一行) */}
-      <div className="grid grid-cols-1 gap-2">
-        <TradeHistoryPanel selectedDate={selectedDate} />
-      </div>
+        {/* 右侧：其他面板 - 占据 8/12 宽度 - 可滚动 */}
+        <div className="lg:col-span-8 h-full overflow-y-auto custom-scrollbar space-y-2 pr-1">
+          {/* 第一行：账户 + 资金成长曲线 (高度对齐) */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-2 items-stretch">
+            <div className="lg:col-span-1 h-full">
+              <UserPanel compact={true} />
+            </div>
+            <div className="lg:col-span-2 h-full">
+              <UserPanel showChart={true} />
+            </div>
+          </div>
 
-      {/* 底部区域：日历 + 持仓 */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-2">
-        {/* 左侧：日历面板 */}
-        <div className="lg:col-span-3">
-          <CalendarPanel selectedDate={selectedDate} onDateChange={setSelectedDate} />
-        </div>
-        {/* 右侧：持仓面板 */}
-        <div className="lg:col-span-9">
-          <PositionPanel />
-        </div>
-      </div>
+          {/* 第二行：交易历史 */}
+          <div className="h-[800px]">
+            <TradeHistoryPanel selectedDate={selectedDate} />
+          </div>
 
-      {/* 底部区域：AI分析 */}
-      <div>
-        <AnalysisPanel />
+          {/* 第三行：AI分析 */}
+          <div>
+            <AnalysisPanel />
+          </div>
+        </div>
       </div>
     </div>
   );

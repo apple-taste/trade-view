@@ -12,6 +12,12 @@ interface TradeContextType {
   _analysisRefreshKey: number;
   _userPanelRefreshKey: number;
   _tradeHistoryRefreshKey: number;
+  lastAddedTrade: any | null;
+  setLastAddedTrade: (trade: any | null) => void;
+  lastUpdatedTrade: any | null;
+  setLastUpdatedTrade: (trade: any | null) => void;
+  lastDeletedTradeId: number | null;
+  setLastDeletedTradeId: (id: number | null) => void;
 }
 
 const TradeContext = createContext<TradeContextType | undefined>(undefined);
@@ -22,6 +28,9 @@ export function TradeProvider({ children }: { children: ReactNode }) {
   const [analysisRefreshKey, setAnalysisRefreshKey] = useState(0);
   const [userPanelRefreshKey, setUserPanelRefreshKey] = useState(0);
   const [tradeHistoryRefreshKey, setTradeHistoryRefreshKey] = useState(0);
+  const [lastAddedTrade, setLastAddedTrade] = useState<any | null>(null);
+  const [lastUpdatedTrade, setLastUpdatedTrade] = useState<any | null>(null);
+  const [lastDeletedTradeId, setLastDeletedTradeId] = useState<number | null>(null);
 
   const refreshCalendar = useCallback(() => {
     setCalendarRefreshKey(prev => prev + 1);
@@ -65,6 +74,12 @@ export function TradeProvider({ children }: { children: ReactNode }) {
         _analysisRefreshKey: analysisRefreshKey,
         _userPanelRefreshKey: userPanelRefreshKey,
         _tradeHistoryRefreshKey: tradeHistoryRefreshKey,
+        lastAddedTrade,
+        setLastAddedTrade,
+        lastUpdatedTrade,
+        setLastUpdatedTrade,
+        lastDeletedTradeId,
+        setLastDeletedTradeId,
       }}
     >
       {children}

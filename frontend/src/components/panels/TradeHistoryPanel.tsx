@@ -1,10 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import axios from 'axios';
-import { Plus, Edit, Trash2, Calendar, List, Trash } from 'lucide-react';
+import { Plus, Edit, Trash2, Calendar, List, Trash, Loader2 } from 'lucide-react';
+import { format, addDays, subDays } from 'date-fns';
 import { useTrade } from '../../contexts/TradeContext';
 import { useAlerts } from '../../contexts/AlertContext';
 import { logger } from '../../utils/logger';
+import { perfMonitor } from '../../utils/performance';
 import { useJojoModal } from '../JojoModal';
+import JojolandMascot from '../JojolandMascot';
 
 // 北京时间工具函数（UTC+8）
 const BEIJING_TIMEZONE_OFFSET = 8 * 60; // 8小时 = 480分钟
@@ -88,8 +91,17 @@ interface StockStatistics {
 
 export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelProps) {
   const { confirm, Modal } = useJojoModal();
+  // 缓存交易记录: 日期 -> 交易列表
+  const tradesCache = useRef<Record<string, Trade[]>>({});
   const [trades, setTrades] = useState<Trade[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // 分页状态
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(20);
+  const [totalPages, setTotalPages] = useState(0);
+  const [totalItems, setTotalItems] = useState(0);
+
   const [showForm, setShowForm] = useState(false);
   const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
   const [viewMode, setViewMode] = useState<'date' | 'all'>('date');
@@ -97,8 +109,29 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
   const [selectedStockCode, setSelectedStockCode] = useState<string | null>(null);
   const [selectedStockName, setSelectedStockName] = useState<string | null>(null);
   const [stockStatistics, setStockStatistics] = useState<StockStatistics | null>(null);
-  const { refreshCalendar, refreshPositions, refreshAnalysis, refreshUserPanel, _tradeHistoryRefreshKey } = useTrade();
+  const { 
+    refreshCalendar, 
+    refreshPositions, 
+    refreshAnalysis, 
+    refreshUserPanel, 
+    _tradeHistoryRefreshKey, 
+    setLastAddedTrade,
+    setLastUpdatedTrade,
+    setLastDeletedTradeId
+  } = useTrade();
   const { clearAlertsByStockCode } = useAlerts();
+
+  // 监听外部刷新信号，清除缓存并刷新
+  useEffect(() => {
+    if (_tradeHistoryRefreshKey > 0) {
+      // 清除当前日期缓存
+      if (selectedDate && tradesCache.current[selectedDate]) {
+        delete tradesCache.current[selectedDate];
+      }
+      fetchTrades(true);
+    }
+  }, [_tradeHistoryRefreshKey]);
+
   // 将选中日期转换为北京时间格式（用于datetime-local输入框）
   const getSelectedDateBeijingTime = (): string => {
     if (selectedDate) {
@@ -158,74 +191,54 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
     }
   }, [formData.risk_per_trade, formData.buy_price, formData.stop_loss_price, sharesManuallySet]);
 
-  useEffect(() => {
-    // 只有当没有数据或需要强制刷新时才显示加载中
-    // 这样切换日期时，如果有旧数据，不会闪烁loading状态
-    if (trades.length === 0) {
-      setLoading(true);
-    }
-    
-    fetchTrades().finally(() => {
-      setLoading(false);
-    });
-
-    if (viewMode === 'all') {
-      fetchStockCodes();
-    } else {
-      setSelectedStockCode(null);
-      setSelectedStockName(null);
+  const fetchTrades = useCallback(async (forceRefresh = false) => {
+    // 如果是日期视图且有缓存，优先使用缓存
+    if (viewMode === 'date' && !forceRefresh && tradesCache.current[selectedDate]) {
+      const cachedData = tradesCache.current[selectedDate];
+      setTrades(cachedData);
       setStockStatistics(null);
+      return;
     }
-  }, [selectedDate, viewMode, _tradeHistoryRefreshKey]);
 
-  // 添加一个新的useEffect来监听日期变化，但只在日期变化时触发
-  useEffect(() => {
-    // 当日期变化时，先清空当前数据，显示加载状态
-    // 或者可以选择保留旧数据，只显示顶部加载条
-    // 这里选择清空数据以避免混淆，但可以优化体验
-    setTrades([]); 
     setLoading(true);
-  }, [selectedDate]);
-
-  useEffect(() => {
-    if (viewMode === 'all' && selectedStockCode) {
-      fetchTradesByStockCode(selectedStockCode);
-    } else if (viewMode === 'all' && !selectedStockCode) {
-      fetchTrades();
-    }
-  }, [selectedStockCode, viewMode]);
-
-  const fetchTrades = async () => {
+    // 性能监控开始
+    const perfLabel = viewMode === 'all' ? `TradeHistory_FetchAll_Page${page}` : `TradeHistory_FetchDate_${selectedDate}`;
+    perfMonitor.start(perfLabel);
+    
     try {
-      // 记录请求开始时间，防止竞态条件
-      const currentRequestTime = Date.now();
-      
-      let url = '/api/trades';
-      const params: any = {};
-      
-      if (viewMode === 'date') {
-        url = `/api/trades/date/${selectedDate}`;
-      } else if (viewMode === 'all') {
-        // 'all' 模式下已经在其他地方处理了 fetchTradesByStockCode
-        // 但如果没有任何筛选条件，可能是获取所有历史（后端可能支持分页）
-        // 这里暂时保持原样，主要优化日期模式
-        return; 
-      }
-      
-      const response = await axios.get(url, { params });
-      
-      // 简单的防抖/竞态处理：如果组件已经卸载或有了新的请求，这里可能会有警告
-      // 但在React useEffect中，我们通常依赖cleanup函数
-      // 这里简化处理，直接设置数据
-      setTrades(response.data.trades || response.data);
-      
-      if (response.data.statistics) {
-        setStockStatistics(response.data.statistics);
+      if (viewMode === 'all') {
+        const response = await axios.get('/api/trades', {
+          params: { page, page_size: pageSize }
+        });
+        
+        // 处理分页响应
+        if (response.data.items) {
+          setTrades(response.data.items);
+          setTotalPages(response.data.total_pages);
+          setTotalItems(response.data.total);
+        } else if (Array.isArray(response.data)) {
+          // 兼容旧格式（虽然后端已经改了，但保留以防万一）
+          setTrades(response.data);
+          setTotalPages(1);
+          setTotalItems(response.data.length);
+        }
+        
+        setStockStatistics(null);
+      } else {
+        const response = await axios.get(`/api/trades/date/${selectedDate}`);
+        const data = response.data;
+        // 更新缓存
+        tradesCache.current[selectedDate] = data;
+        setTrades(data);
+        setStockStatistics(null);
       }
     } catch (error) {
       console.error('获取交易记录失败:', error);
+    } finally {
+      perfMonitor.end(perfLabel);
+      setLoading(false);
     }
-  };
+  }, [selectedDate, viewMode, page, pageSize]);
 
   const fetchStockCodes = async () => {
     try {
@@ -257,24 +270,57 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
     }
   };
 
-  const fetchTrades = async () => {
-    setLoading(true);
-    try {
-      if (viewMode === 'all') {
-        const response = await axios.get('/api/trades');
-        setTrades(response.data);
-        setStockStatistics(null);
-      } else {
-        const response = await axios.get(`/api/trades/date/${selectedDate}`);
-        setTrades(response.data);
-        setStockStatistics(null);
-      }
-    } catch (error) {
-      console.error('获取交易记录失败:', error);
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    // 当fetchTrades依赖变化时（包括分页、视图模式、日期），重新获取数据
+    fetchTrades();
+  }, [fetchTrades]);
+
+  useEffect(() => {
+    // 视图模式改变时的副作用
+    if (viewMode === 'all') {
+      fetchStockCodes();
+    } else {
+      setSelectedStockCode(null);
+      setSelectedStockName(null);
+      setStockStatistics(null);
     }
-  };
+  }, [viewMode]);
+
+  useEffect(() => {
+    if (viewMode === 'all' && selectedStockCode) {
+      fetchTradesByStockCode(selectedStockCode);
+    } else if (viewMode === 'all' && !selectedStockCode) {
+      fetchTrades();
+    }
+  }, [selectedStockCode, viewMode]);
+
+  // 预加载相邻日期的交易记录
+  useEffect(() => {
+    if (viewMode === 'date') {
+      const preloadDate = async (dateStr: string) => {
+        if (!tradesCache.current[dateStr]) {
+          try {
+            const response = await axios.get(`/api/trades/date/${dateStr}`);
+            tradesCache.current[dateStr] = response.data;
+            // logger.info(`✅ [TradeHistory] 预加载成功: ${dateStr}`);
+          } catch (err) {
+            // 忽略预加载错误
+          }
+        }
+      };
+
+      const currentDate = new Date(selectedDate);
+      // 简单的防抖：延迟预加载，优先保证当前页面渲染
+      const timer = setTimeout(() => {
+        const prevDate = format(subDays(currentDate, 1), 'yyyy-MM-dd');
+        const nextDate = format(addDays(currentDate, 1), 'yyyy-MM-dd');
+        preloadDate(prevDate);
+        preloadDate(nextDate);
+      }, 300);
+
+      return () => clearTimeout(timer);
+    }
+  }, [selectedDate, viewMode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -312,7 +358,8 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
         delete data.risk_per_trade;
         
         console.log('📝 [编辑交易] 发送更新数据:', data);
-        await axios.put(`/api/trades/${editingTrade.id}`, data);
+        const response = await axios.put(`/api/trades/${editingTrade.id}`, data);
+        setLastUpdatedTrade(response.data);
       } else {
         // 新建交易时，如果用户提供了手数，优先使用手数；否则使用单笔风险
         if (!data.shares && formData.risk_per_trade) {
@@ -323,23 +370,30 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
         }
         
         console.log('📝 [新建交易] 发送创建数据:', data);
-        await axios.post('/api/trades', data);
+        const response = await axios.post('/api/trades', data);
+        // 更新最近添加的交易，用于其他面板增量更新
+        setLastAddedTrade(response.data);
       }
 
       setShowForm(false);
       setEditingTrade(null);
       resetForm();
       
+      // 清除当前日期缓存，确保获取最新数据
+      if (selectedDate && tradesCache.current[selectedDate]) {
+        delete tradesCache.current[selectedDate];
+      }
+
       // 优化：并行刷新相关面板，减少等待时间
       Promise.all([
-        fetchTrades(), // 刷新当前列表
+        fetchTrades(true), // 刷新当前列表
         refreshCalendar(), // 刷新日历标记
-        refreshPositions(), // 刷新持仓（如果有新持仓）
-        refreshUserPanel(), // 刷新用户面板（资金可能变化）
-        refreshAnalysis() // 刷新AI分析（最后刷新，因为最耗时）
-      ]).catch(error => {
-        console.error('刷新面板失败:', error);
-      });
+        // refreshPositions(), // 刷新持仓 (通过增量更新机制处理，避免全量刷新)
+        refreshAnalysis(), // 刷新AI分析
+        refreshUserPanel() // 刷新用户面板
+      ]);
+      
+      logger.info(`✅ [TradeHistory] 交易保存成功，已触发相关面板刷新`);
     } catch (error: any) {
       console.error('❌ [交易操作] 操作失败:', error);
       const errorMessage = error.response?.data?.detail || error.message || '操作失败';
@@ -442,6 +496,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
     try {
       logger.info(`🗑️ [TradeHistory] 删除交易记录 ID: ${id}`);
       await axios.delete(`/api/trades/${id}`);
+      setLastDeletedTradeId(id);
       logger.info(`✅ [TradeHistory] 交易记录已删除，等待后端重新计算资金曲线...`);
       
       // 清除与该交易相关的所有提醒（止损和止盈）
@@ -454,10 +509,15 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       
       // 刷新相关面板（这会自动清除已删除交易的提醒）
       refreshCalendar(); // 刷新日历标记
-      refreshPositions(); // 刷新持仓（已删除的交易不会出现在持仓中，相关提醒也会消失）
+      // refreshPositions(); // 刷新持仓（通过增量更新机制处理，避免全量刷新）
       refreshAnalysis(); // 刷新AI分析
       refreshUserPanel(); // 刷新用户面板（重新获取资金数据）
-      fetchTrades(); // 刷新当前列表
+      
+      // 清除缓存并强制刷新
+      if (selectedDate && tradesCache.current[selectedDate]) {
+        delete tradesCache.current[selectedDate];
+      }
+      fetchTrades(true); // 刷新当前列表
       
       logger.info(`✅ [TradeHistory] 所有面板已刷新`);
     } catch (error: any) {
@@ -498,18 +558,17 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
 
   if (loading) {
     return (
-      <div className="jojo-card p-3 text-center">
+      <div className="jojo-card p-3 h-full flex flex-col items-center justify-center text-center">
         <div className="text-jojo-gold animate-jojo-pulse text-sm">加载中...</div>
       </div>
     );
   }
 
   return (
-    <div className="jojo-card p-3">
-      <div className="flex justify-between items-center mb-2">
-        <div className="flex items-center space-x-2">
-          <h2 className="jojo-title text-lg">开仓记录历史</h2>
-          {/* 查看模式切换按钮 */}
+    <div className="jojo-card p-3 h-full flex flex-col min-h-0">
+      <div className="flex items-center mb-2 gap-2">
+        <div className="flex items-center space-x-2 flex-shrink-0">
+          <h2 className="jojo-title text-lg whitespace-nowrap">开仓记录历史</h2>
           <div className="flex items-center space-x-1 bg-jojo-blue-light rounded p-0.5 border border-jojo-gold">
             <button
               onClick={() => setViewMode('date')}
@@ -535,7 +594,10 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
             </button>
           </div>
         </div>
-        <div className="flex items-center space-x-1">
+        <div className="flex-1 flex justify-center px-2">
+          <JojolandMascot inline />
+        </div>
+        <div className="flex items-center space-x-1 flex-shrink-0">
           <button
             onClick={() => {
               resetForm();
@@ -875,7 +937,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
         </form>
       )}
 
-      <div className="overflow-x-auto max-h-[500px] overflow-y-auto custom-scrollbar">
+      <div className="overflow-x-auto flex-1 overflow-y-auto custom-scrollbar min-h-0">
         <table className="jojo-table text-xs">
           <thead className="sticky top-0 bg-jojo-blue">
             <tr>
@@ -899,7 +961,16 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
             </tr>
           </thead>
           <tbody>
-            {trades.length === 0 ? (
+            {loading ? (
+              <tr>
+                <td colSpan={viewMode === 'all' ? 17 : 11} className="px-2 py-8 text-center text-gray-400">
+                  <div className="flex flex-col items-center justify-center space-y-2">
+                    <Loader2 className="animate-spin text-jojo-gold" size={24} />
+                    <span>加载交易记录中...</span>
+                  </div>
+                </td>
+              </tr>
+            ) : trades.length === 0 ? (
               <tr>
                 <td colSpan={viewMode === 'all' ? 17 : 11} className="px-2 py-4 text-center text-gray-400">
                   {viewMode === 'all' ? '暂无交易记录' : '该日期暂无交易记录'}
@@ -1072,6 +1143,42 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
         </table>
       </div>
       
+      {/* 分页控件 - 仅在全部历史模式下显示 */}
+      {viewMode === 'all' && totalPages > 0 && (
+        <div className="flex items-center justify-between mt-3 px-2 py-1 bg-jojo-blue-light rounded border border-jojo-gold/30">
+          <div className="text-xs text-gray-300">
+            共 <span className="text-jojo-gold font-bold">{totalItems}</span> 条记录
+            <span className="mx-2 text-gray-600">|</span>
+            第 <span className="text-white font-bold">{page}</span> / {totalPages} 页
+          </div>
+          
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page <= 1 || loading}
+              className={`px-3 py-1 text-xs rounded transition-all ${
+                page <= 1 || loading
+                  ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                  : 'bg-jojo-blue border border-jojo-gold text-jojo-gold hover:bg-jojo-gold hover:text-jojo-blue'
+              }`}
+            >
+              上一页
+            </button>
+            <button
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages || loading}
+              className={`px-3 py-1 text-xs rounded transition-all ${
+                page >= totalPages || loading
+                  ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                  : 'bg-jojo-blue border border-jojo-gold text-jojo-gold hover:bg-jojo-gold hover:text-jojo-blue'
+              }`}
+            >
+              下一页
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* JOJO风格弹窗 */}
       <Modal />
     </div>

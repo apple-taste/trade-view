@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr
 from datetime import datetime, date
-from typing import Optional, Union
+from typing import Optional, Union, List
 
 # 认证相关
 class UserRegister(BaseModel):
@@ -136,6 +136,13 @@ class TradeResponse(BaseModel):
     profit_loss: Optional[float] = None  # 盈亏金额
     created_at: datetime
     updated_at: datetime
+
+class PaginatedTradeResponse(BaseModel):
+    items: List[TradeResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
 
 # 持仓相关
 class PositionUpdate(BaseModel):

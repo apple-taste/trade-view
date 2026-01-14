@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, Date, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, Date, UniqueConstraint, Index
 from datetime import datetime
 import os
 from pathlib import Path
@@ -73,6 +73,9 @@ class CapitalHistory(Base):
 
 class Trade(Base):
     __tablename__ = "trades"
+    __table_args__ = (
+        Index('idx_user_open_time', 'user_id', 'is_deleted', 'open_time'),
+    )
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, nullable=False, index=True)

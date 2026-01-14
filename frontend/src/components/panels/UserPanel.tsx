@@ -184,7 +184,7 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
   if (compact) {
     return (
       <>
-      <div className="jojo-card p-3">
+      <div className="jojo-card p-3 h-full flex flex-col">
         <h2 className="jojo-title text-lg mb-2">账户</h2>
         <div className="space-y-2">
           <div>
@@ -231,48 +231,50 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
   if (showChart) {
     return (
       <>
-      <div className="jojo-card p-3">
+      <div className="jojo-card p-3 h-full flex flex-col">
         <h2 className="jojo-title text-lg mb-2">资金成长曲线</h2>
-        {history.length > 0 ? (
-          <ResponsiveContainer width="100%" height={180}>
-            <LineChart data={history}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#FFD700" opacity={0.3} />
-              <XAxis 
-                dataKey="date" 
-                stroke="#FFD700"
-                style={{ fill: '#FFD700' }}
-              />
-              <YAxis 
-                stroke="#FFD700"
-                style={{ fill: '#FFD700' }}
-              />
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: '#1a1a2e', 
-                  border: '2px solid #FFD700',
-                  borderRadius: '8px',
-                  color: '#FFD700'
-                }}
-              />
-              <Legend 
-                wrapperStyle={{ color: '#FFD700' }}
-              />
-              <Line 
-                type="monotone" 
-                dataKey="capital" 
-                stroke="#FFD700" 
-                strokeWidth={3}
-                dot={{ fill: '#FFD700', r: 4 }}
-                activeDot={{ r: 6 }}
-                name="资金"
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        ) : (
-          <div className="text-center py-6 text-gray-400 text-sm">
-            <p>暂无资金历史数据</p>
-          </div>
-        )}
+        <div className="flex-1 min-h-[160px]">
+          {history.length > 0 ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={history}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#FFD700" opacity={0.3} />
+                <XAxis 
+                  dataKey="date" 
+                  stroke="#FFD700"
+                  style={{ fill: '#FFD700' }}
+                />
+                <YAxis 
+                  stroke="#FFD700"
+                  style={{ fill: '#FFD700' }}
+                />
+                <Tooltip 
+                  contentStyle={{ 
+                    backgroundColor: '#1a1a2e', 
+                    border: '2px solid #FFD700',
+                    borderRadius: '8px',
+                    color: '#FFD700'
+                  }}
+                />
+                <Legend 
+                  wrapperStyle={{ color: '#FFD700' }}
+                />
+                <Line 
+                  type="monotone" 
+                  dataKey="capital" 
+                  stroke="#FFD700" 
+                  strokeWidth={3}
+                  dot={{ fill: '#FFD700', r: 4 }}
+                  activeDot={{ r: 6 }}
+                  name="资金"
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex items-center justify-center h-full text-gray-400 text-sm">
+              <p>暂无资金历史数据</p>
+            </div>
+          )}
+        </div>
       </div>
       <Modal />
       <CapitalModal />

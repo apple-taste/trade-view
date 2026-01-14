@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 from app.database import get_db, Trade, CapitalHistory
 from app.middleware.auth import get_current_user
-from app.models import TradeCreate, TradeUpdate, TradeResponse
+from app.models import TradeCreate, TradeUpdate, TradeResponse, PaginatedTradeResponse
 from app.database import User
 from app.routers.user import recalculate_capital_history
 from app.services.commission_calculator import default_calculator
@@ -18,27 +18,44 @@ router = APIRouter()
 
 @router.get(
     "",
-    response_model=list[TradeResponse],
-    summary="获取所有交易记录",
+    response_model=PaginatedTradeResponse,
+    summary="获取所有交易记录（分页）",
     description="""
     获取当前用户的所有交易记录（历史订单）。
     
+    支持分页查询，默认返回第1页，每页50条。
     返回所有交易记录的列表，按开仓时间倒序排列。
     包括已平仓和未平仓的所有交易记录。
     **不包含已删除的记录**。
     """,
     responses={
-        200: {"description": "成功返回所有交易记录列表"}
+        200: {"description": "成功返回分页交易记录列表"}
     }
 )
 async def get_all_trades(
+    page: int = 1,
+    page_size: int = 50,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    # 计算总数
+    count_result = await db.execute(
+        select(func.count())
+        .select_from(Trade)
+        .where(Trade.user_id == current_user.id, Trade.is_deleted == False)
+    )
+    total = count_result.scalar()
+    
+    # 计算偏移量
+    offset = (page - 1) * page_size
+    
+    # 查询数据
     result = await db.execute(
         select(Trade)
         .where(Trade.user_id == current_user.id, Trade.is_deleted == False)
         .order_by(Trade.open_time.desc())
+        .offset(offset)
+        .limit(page_size)
     )
     trades = result.scalars().all()
     
@@ -78,7 +95,15 @@ async def get_all_trades(
             trade_dict['risk_reward_ratio'] = None
         trade_responses.append(TradeResponse(**trade_dict))
     
-    return trade_responses
+    total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
+    
+    return {
+        "items": trade_responses,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages
+    }
 
 @router.get(
     "/date/{trade_date}",

@@ -4,6 +4,7 @@ import { Bell, BellOff, TrendingUp, TrendingDown, RefreshCw, Info } from 'lucide
 import { useTrade } from '../../contexts/TradeContext';
 import { useAlerts } from '../../contexts/AlertContext';
 import { useJojoPriceModal } from '../JojoPriceModal';
+import { perfMonitor } from '../../utils/performance';
 
 interface Position {
   id: number;
@@ -26,17 +27,124 @@ export default function PositionPanel() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const refreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const alertedPositionsRef = useRef<Set<string>>(new Set()); // 记录已提醒的持仓，避免重复提醒
-  const { refreshCalendar, refreshAnalysis, refreshUserPanel, refreshTradeHistory, _positionsRefreshKey } = useTrade();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const { 
+    refreshCalendar, 
+    refreshAnalysis, 
+    refreshUserPanel, 
+    refreshTradeHistory, 
+    _positionsRefreshKey, 
+    lastAddedTrade, 
+    setLastAddedTrade,
+    lastUpdatedTrade,
+    setLastUpdatedTrade,
+    lastDeletedTradeId,
+    setLastDeletedTradeId
+  } = useTrade();
   const { addAlert, clearAlertsByStockCode } = useAlerts();
+
+  // 监听新增交易，实现增量更新
+  useEffect(() => {
+    if (lastAddedTrade) {
+      // 如果是已平仓的交易（有卖出价格或离场时间），不添加到持仓列表
+      if (lastAddedTrade.sell_price || lastAddedTrade.close_time) {
+        setLastAddedTrade(null);
+        return;
+      }
+
+      // 检查是否已存在（避免重复添加）
+      setPositions(prev => {
+        if (prev.find(p => p.id === lastAddedTrade.id)) return prev;
+        
+        // 转换 Trade 到 Position
+        // 注意：这里假设 lastAddedTrade 符合 Position 接口的部分字段，
+        // 或者我们需要手动映射。由于 Trade 和 Position 结构相似，只需补充缺少的字段。
+        const newPosition: Position = {
+          id: lastAddedTrade.id,
+          stock_code: lastAddedTrade.stock_code,
+          stock_name: lastAddedTrade.stock_name,
+          shares: lastAddedTrade.shares,
+          buy_price: lastAddedTrade.buy_price,
+          commission: lastAddedTrade.commission,
+          current_price: lastAddedTrade.current_price || lastAddedTrade.buy_price, // 初始使用买入价
+          price_source: '最新交易',
+          stop_loss_price: lastAddedTrade.stop_loss_price,
+          take_profit_price: lastAddedTrade.take_profit_price,
+          stop_loss_alert: lastAddedTrade.stop_loss_alert,
+          take_profit_alert: lastAddedTrade.take_profit_alert,
+          holding_days: 0
+        };
+        
+        return [newPosition, ...prev];
+      });
+      
+      // 消费完后重置
+      setLastAddedTrade(null);
+      
+      // 立即触发一次价格刷新，获取最新现价
+      setTimeout(() => refreshPrices(true), 100);
+    }
+  }, [lastAddedTrade, setLastAddedTrade]);
+
+  // 监听编辑交易，实现增量更新
+  useEffect(() => {
+    if (lastUpdatedTrade) {
+      // 如果更新后的交易已平仓，从持仓列表中移除
+      if (lastUpdatedTrade.sell_price || lastUpdatedTrade.close_time) {
+        setPositions(prev => prev.filter(p => p.id !== lastUpdatedTrade.id));
+        
+        // 清除提醒标记
+        const stopLossKey = `${lastUpdatedTrade.id}-stop_loss`;
+        const takeProfitKey = `${lastUpdatedTrade.id}-take_profit`;
+        alertedPositionsRef.current.delete(stopLossKey);
+        alertedPositionsRef.current.delete(takeProfitKey);
+      } else {
+        // 更新持仓信息
+        setPositions(prev => prev.map(p => {
+          if (p.id === lastUpdatedTrade.id) {
+            return {
+              ...p,
+              stock_code: lastUpdatedTrade.stock_code,
+              stock_name: lastUpdatedTrade.stock_name,
+              shares: lastUpdatedTrade.shares,
+              buy_price: lastUpdatedTrade.buy_price,
+              stop_loss_price: lastUpdatedTrade.stop_loss_price,
+              take_profit_price: lastUpdatedTrade.take_profit_price,
+              stop_loss_alert: lastUpdatedTrade.stop_loss_alert,
+              take_profit_alert: lastUpdatedTrade.take_profit_alert,
+            };
+          }
+          return p;
+        }));
+      }
+      setLastUpdatedTrade(null);
+    }
+  }, [lastUpdatedTrade, setLastUpdatedTrade]);
+
+  // 监听删除交易，实现增量更新
+  useEffect(() => {
+    if (lastDeletedTradeId) {
+      setPositions(prev => prev.filter(p => p.id !== lastDeletedTradeId));
+      
+      // 清除提醒标记
+      const stopLossKey = `${lastDeletedTradeId}-stop_loss`;
+      const takeProfitKey = `${lastDeletedTradeId}-take_profit`;
+      alertedPositionsRef.current.delete(stopLossKey);
+      alertedPositionsRef.current.delete(takeProfitKey);
+      
+      setLastDeletedTradeId(null);
+    }
+  }, [lastDeletedTradeId, setLastDeletedTradeId]);
 
   useEffect(() => {
     fetchPositions();
     
     // 设置定时刷新价格（每500ms，毫秒级实时性）
     refreshIntervalRef.current = setInterval(() => {
-      refreshPrices(true); // 强制刷新
+      refreshPrices(true, true); // 强制刷新，但静默模式（不显示loading，不锁定高度）
     }, 500); // 500ms = 0.5秒
 
     return () => {
@@ -47,6 +155,7 @@ export default function PositionPanel() {
   }, [_positionsRefreshKey]); // 当refresh key变化时刷新
 
   const fetchPositions = async () => {
+    setIsSyncing(true);
     try {
       const response = await axios.get('/api/positions');
       const newPositions = response.data;
@@ -70,15 +179,25 @@ export default function PositionPanel() {
     } catch (error) {
       console.error('获取持仓失败:', error);
     } finally {
+      perfMonitor.end('PositionPanel_FetchPositions');
       setLoading(false);
+      setIsSyncing(false);
     }
   };
 
-  const refreshPrices = async (forceRefresh: boolean = true) => {
+  const refreshPrices = async (forceRefresh: boolean = true, silent: boolean = false) => {
     if (positions.length === 0) return;
     
+    // 锁定面板高度以防止抖动
+    if (panelRef.current && !silent) {
+      const height = panelRef.current.offsetHeight;
+      panelRef.current.style.minHeight = `${height}px`;
+    }
+    
     try {
-      setRefreshing(true);
+      if (!silent) setRefreshing(true);
+      if (!silent) perfMonitor.start('PositionPanel_RefreshPrices');
+      
       const stockCodes = positions.map(p => p.stock_code);
       const response = await axios.post('/api/price/batch', stockCodes, {
         params: { force_refresh: forceRefresh }
@@ -92,24 +211,40 @@ export default function PositionPanel() {
         ])
       );
       
-      setPositions(prev => prev.map(pos => {
-        const priceInfo = priceMap.get(pos.stock_code);
-        if (priceInfo) {
-          const updatedPos = {
-            ...pos,
-            current_price: priceInfo.price,
-            price_source: priceInfo.source
-          };
-          // 检查提醒
-          checkAlerts(updatedPos);
-          return updatedPos;
-        }
-        return pos;
-      }));
+      setPositions(prev => {
+        let hasChanges = false;
+        const newPositions = prev.map(pos => {
+          const priceInfo = priceMap.get(pos.stock_code);
+          if (priceInfo) {
+            // 只有当价格发生变化时才更新
+            if (pos.current_price !== priceInfo.price || pos.price_source !== priceInfo.source) {
+              hasChanges = true;
+              const updatedPos = {
+                ...pos,
+                current_price: priceInfo.price,
+                price_source: priceInfo.source
+              };
+              // 检查提醒
+              checkAlerts(updatedPos);
+              return updatedPos;
+            }
+          }
+          return pos;
+        });
+        
+        return hasChanges ? newPositions : prev;
+      });
     } catch (error) {
       console.error('刷新价格失败:', error);
     } finally {
-      setRefreshing(false);
+      if (!silent) setRefreshing(false);
+      // 解锁面板高度
+      if (panelRef.current && !silent) {
+        // 稍微延迟解锁，确保渲染完成
+        setTimeout(() => {
+          if (panelRef.current) panelRef.current.style.minHeight = '';
+        }, 100);
+      }
     }
   };
 
@@ -160,6 +295,18 @@ export default function PositionPanel() {
   };
 
   const handleToggleAlert = async (positionId: number, type: 'stop_loss' | 'take_profit', currentValue: boolean) => {
+    // 乐观更新：先更新UI
+    const originalPositions = [...positions];
+    setPositions(prev => prev.map(p => {
+      if (p.id === positionId) {
+        return {
+          ...p,
+          [type === 'stop_loss' ? 'stop_loss_alert' : 'take_profit_alert']: !currentValue
+        };
+      }
+      return p;
+    }));
+
     try {
       const updateData: any = {};
       if (type === 'stop_loss') {
@@ -169,8 +316,10 @@ export default function PositionPanel() {
       }
       
       await axios.put(`/api/positions/${positionId}`, updateData);
-      fetchPositions();
+      // fetchPositions(); // 不需要重新加载，因为已经乐观更新
     } catch (error) {
+      // 失败回滚
+      setPositions(originalPositions);
       alert('更新失败');
     }
   };
@@ -184,6 +333,10 @@ export default function PositionPanel() {
       position.take_profit_price
     );
     if (result && result.price && !isNaN(parseFloat(result.price))) {
+      // 乐观更新：先从列表中移除
+      const originalPositions = [...positions];
+      setPositions(prev => prev.filter(p => p.id !== position.id));
+
       try {
         const requestData: any = {
           sell_price: parseFloat(result.price)
@@ -197,13 +350,15 @@ export default function PositionPanel() {
         // 清除该股票的所有价格提醒（平仓后不再需要提醒）
         clearAlertsByStockCode(position.stock_code);
         
-        fetchPositions();
+        // fetchPositions(); // 不需要重新加载
         // 刷新相关面板
         refreshCalendar(); // 刷新日历标记
         refreshAnalysis(); // 刷新AI分析
         refreshUserPanel(); // 刷新用户面板（资金变化）
         refreshTradeHistory(); // 刷新开仓历史面板（显示平仓状态）
       } catch (error: any) {
+        // 失败回滚
+        setPositions(originalPositions);
         alert(error.response?.data?.detail || '操作失败');
       }
     }
@@ -218,6 +373,10 @@ export default function PositionPanel() {
       position.stop_loss_price
     );
     if (result && result.price && !isNaN(parseFloat(result.price))) {
+      // 乐观更新：先从列表中移除
+      const originalPositions = [...positions];
+      setPositions(prev => prev.filter(p => p.id !== position.id));
+
       try {
         const requestData: any = {
           sell_price: parseFloat(result.price)
@@ -231,13 +390,15 @@ export default function PositionPanel() {
         // 清除该股票的所有价格提醒（平仓后不再需要提醒）
         clearAlertsByStockCode(position.stock_code);
         
-        fetchPositions();
+        // fetchPositions(); // 不需要重新加载
         // 刷新相关面板
         refreshCalendar(); // 刷新日历标记
         refreshAnalysis(); // 刷新AI分析
         refreshUserPanel(); // 刷新用户面板（资金变化）
         refreshTradeHistory(); // 刷新开仓历史面板（显示平仓状态）
       } catch (error: any) {
+        // 失败回滚
+        setPositions(originalPositions);
         alert(error.response?.data?.detail || '操作失败');
       }
     }
@@ -259,17 +420,25 @@ export default function PositionPanel() {
   }
 
   return (
-    <div className="jojo-card p-3">
+    <div ref={panelRef} className="jojo-card p-3">
       <div className="flex justify-between items-center mb-2">
         <h2 className="jojo-title text-lg">持仓</h2>
         <button
           onClick={() => refreshPrices(true)}
-          disabled={refreshing}
-          className="jojo-button flex items-center space-x-1 p-1 text-xs"
+          disabled={refreshing || isSyncing}
+          className="jojo-button flex items-center justify-center p-1 text-xs min-w-[50px]"
           title="手动刷新价格"
         >
-          <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
-          <span>刷新</span>
+          {refreshing || isSyncing ? (
+            <div className="animate-spin text-jojo-gold transform-gpu">
+              <RefreshCw size={16} />
+            </div>
+          ) : (
+            <div className="flex items-center space-x-1">
+              <RefreshCw size={14} />
+              <span>刷新</span>
+            </div>
+          )}
         </button>
       </div>
 
@@ -304,7 +473,7 @@ export default function PositionPanel() {
                     )}
                   </div>
                   
-                  <div className="grid grid-cols-2 gap-1 text-xs text-gray-300 mb-1">
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-1 text-xs text-gray-300 mb-1">
                     <div>
                       <span className="text-gray-400">持仓天数:</span> {position.holding_days} 天
                     </div>
@@ -413,12 +582,6 @@ export default function PositionPanel() {
               </div>
             );
           })}
-        </div>
-      )}
-      
-      {refreshing && (
-        <div className="mt-4 text-center text-sm text-jojo-gold">
-          正在刷新价格...
         </div>
       )}
       

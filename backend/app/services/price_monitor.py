@@ -67,6 +67,11 @@ class PriceMonitor:
         self.task: asyncio.Task | None = None
         self.CACHE_TTL = 0.5  # 0.5秒缓存（毫秒级实时性）
         self.update_interval = 0.5  # 0.5秒更新一次价格（500ms）
+        self.price_change_callbacks = []  # 价格变化回调列表
+
+    def add_price_change_callback(self, callback):
+        """添加价格变化回调函数"""
+        self.price_change_callbacks.append(callback)
     
     def _normalize_stock_code(self, stock_code: str) -> str:
         """标准化股票代码格式
