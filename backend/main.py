@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from contextlib import asynccontextmanager
 import uvicorn
 import logging
@@ -320,6 +320,7 @@ async def root():
     - 返回服务状态和基本信息
     - 包含价格监控服务状态
     - 包含环境变量配置状态
+    - 支持GET和HEAD方法（HEAD用于Koyeb健康检查）
     
     **返回信息**:
     - `status`: 服务状态 ("healthy" 或 "unhealthy")
@@ -353,6 +354,12 @@ async def root():
         }
     }
 )
+@app.head("/api/health")
+async def health_check_head():
+    """健康检查HEAD方法（用于Koyeb健康检查）"""
+    # HEAD请求只返回状态码，不返回body
+    return Response(status_code=200)
+
 async def health_check():
     """
     健康检查端点（增强版）
