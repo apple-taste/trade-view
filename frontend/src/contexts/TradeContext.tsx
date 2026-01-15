@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, ReactNode, useEffect, useMemo } from 'react';
 import axios from 'axios';
+import { useAuth } from './AuthContext';
 
 type Strategy = {
   id: number;
@@ -51,6 +52,7 @@ interface TradeContextType {
 const TradeContext = createContext<TradeContextType | undefined>(undefined);
 
 export function TradeProvider({ children }: { children: ReactNode }) {
+  const { token, loading } = useAuth();
   const [calendarRefreshKey, setCalendarRefreshKey] = useState(0);
   const [positionsRefreshKey, setPositionsRefreshKey] = useState(0);
   const [analysisRefreshKey, setAnalysisRefreshKey] = useState(0);
@@ -270,12 +272,26 @@ export function TradeProvider({ children }: { children: ReactNode }) {
   }, [refreshAll, refreshForexStrategies]);
 
   useEffect(() => {
+    if (loading) return;
+    if (!token) {
+      setStrategies([]);
+      setCurrentStrategyIdState(null);
+      localStorage.removeItem('currentStockStrategyId');
+      return;
+    }
     refreshStrategies().catch(() => {});
-  }, [refreshStrategies]);
+  }, [loading, refreshStrategies, token]);
 
   useEffect(() => {
+    if (loading) return;
+    if (!token) {
+      setForexStrategies([]);
+      setCurrentForexStrategyIdState(null);
+      localStorage.removeItem('currentForexStrategyId');
+      return;
+    }
     refreshForexStrategies().catch(() => {});
-  }, [refreshForexStrategies]);
+  }, [loading, refreshForexStrategies, token]);
 
   return (
     <TradeContext.Provider
