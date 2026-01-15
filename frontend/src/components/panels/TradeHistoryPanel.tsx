@@ -425,14 +425,14 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       };
       data.strategy_id = effectiveStrategyId;
       
+      let response;
       // 编辑时不需要发送 risk_per_trade
       if (editingTrade) {
         // 移除不需要的字段
         delete data.risk_per_trade;
         
         console.log('📝 [编辑交易] 发送更新数据:', data);
-        const response = await axios.put(`/api/trades/${editingTrade.id}`, data);
-        setLastUpdatedTrade(response.data);
+        response = await axios.put(`/api/trades/${editingTrade.id}`, data);
       } else {
         // 新建交易时，如果用户提供了手数，优先使用手数；否则使用单笔风险
         if (!data.shares && formData.risk_per_trade) {
@@ -443,30 +443,44 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
         }
         
         console.log('📝 [新建交易] 发送创建数据:', data);
-        const response = await axios.post('/api/trades', data);
-        // 更新最近添加的交易，用于其他面板增量更新
-        setLastAddedTrade(response.data);
+        response = await axios.post('/api/trades', data);
       }
 
+      // 乐观UI更新：先关闭弹窗，再后台刷新
       setShowForm(false);
       setEditingTrade(null);
       resetForm();
+
+      // 手动更新本地列表，减少视觉等待
+      if (editingTrade) {
+        setTrades(prev => prev.map(t => t.id === response.data.id ? response.data : t));
+        setLastUpdatedTrade(response.data);
+      } else {
+        setTrades(prev => [response.data, ...prev]);
+        setLastAddedTrade(response.data);
+      }
       
       // 清除当前日期缓存，确保获取最新数据
       tradesCache.current = {};
 
-      // 优化：并行刷新相关面板，减少等待时间
-      Promise.all([
-        fetchTrades(true), // 刷新当前列表
-        refreshCalendar(), // 刷新日历标记
-        // refreshPositions(), // 刷新持仓 (通过增量更新机制处理，避免全量刷新)
-        refreshAnalysis(), // 刷新AI分析
-        refreshUserPanel() // 刷新用户面板
-      ]);
+      // 后台异步刷新相关面板，不阻塞UI交互
+      setTimeout(() => {
+        Promise.all([
+          fetchTrades(true), // 刷新当前列表以确保一致性
+          refreshCalendar(), // 刷新日历标记
+          // refreshPositions(), // 刷新持仓 (通过增量更新机制处理，避免全量刷新)
+          refreshAnalysis(), // 刷新AI分析
+          refreshUserPanel() // 刷新用户面板
+        ]).catch(err => {
+          console.error('后台刷新失败:', err);
+        });
+      }, 10);
       
-      logger.info(`✅ [TradeHistory] 交易保存成功，已触发相关面板刷新`);
+      logger.info(`✅ [TradeHistory] 交易保存成功，已触发后台刷新`);
     } catch (error: any) {
       console.error('❌ [交易操作] 操作失败:', error);
+      // 如果失败，确保表单保持打开状态
+      setShowForm(true);
       const errorMessage = error.response?.data?.detail || error.message || '操作失败';
       alert(`❌ 操作失败\n\n${errorMessage}`);
     }
@@ -571,33 +585,39 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
     try {
       logger.info(`🗑️ [TradeHistory] 删除交易记录 ID: ${id}`);
       await axios.delete(`/api/trades/${id}`);
+      
+      // 乐观UI更新：立即从列表中移除
+      setTrades(prev => prev.filter(t => t.id !== id));
       setLastDeletedTradeId(id);
-      logger.info(`✅ [TradeHistory] 交易记录已删除，等待后端重新计算资金曲线...`);
       
       // 清除与该交易相关的所有提醒（止损和止盈）
       if (hasAlerts) {
         clearAlertsByStockCode(tradeToDelete.stock_code);
       }
       
-      // 等待一小段时间确保后端已完成资金曲线重新计算
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // 刷新相关面板（这会自动清除已删除交易的提醒）
-      refreshCalendar(); // 刷新日历标记
-      // refreshPositions(); // 刷新持仓（通过增量更新机制处理，避免全量刷新）
-      refreshAnalysis(); // 刷新AI分析
-      refreshUserPanel(); // 刷新用户面板（重新获取资金数据）
-      
-      // 清除缓存并强制刷新
+      // 清除缓存
       if (selectedDate) {
         const key = getCacheKey(selectedDate);
         if (tradesCache.current[key]) {
           delete tradesCache.current[key];
         }
       }
-      fetchTrades(true); // 刷新当前列表
+
+      logger.info(`✅ [TradeHistory] 交易记录已删除，后台正在刷新数据...`);
+
+      // 后台异步刷新相关面板
+      setTimeout(() => {
+        Promise.all([
+          fetchTrades(true), // 确保数据一致性
+          refreshCalendar(), // 刷新日历标记
+          // refreshPositions(), // 刷新持仓
+          refreshAnalysis(), // 刷新AI分析
+          refreshUserPanel() // 刷新用户面板（重新获取资金数据）
+        ]).catch(err => {
+          console.error('后台刷新失败:', err);
+        });
+      }, 500); // 保持短暂延迟以确保后端计算完成
       
-      logger.info(`✅ [TradeHistory] 所有面板已刷新`);
     } catch (error: any) {
       logger.error('❌ [TradeHistory] 删除失败', error.response?.data || error.message);
       alert('删除失败');

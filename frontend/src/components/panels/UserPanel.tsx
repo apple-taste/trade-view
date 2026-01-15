@@ -45,6 +45,21 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
   const [emailAlertsEnabled, setEmailAlertsEnabled] = useState<boolean>(false);
   const { _userPanelRefreshKey, refreshUserPanel, refreshAnalysis, effectiveStrategyId, strategies } = useTrade();
 
+  const CHART_COLORS = [
+    '#FFD700', // Gold
+    '#10B981', // Emerald
+    '#3B82F6', // Blue
+    '#EC4899', // Pink
+    '#8B5CF6', // Violet
+    '#F97316', // Orange
+    '#EF4444', // Red
+    '#14B8A6', // Teal
+    '#F59E0B', // Amber
+    '#6366F1', // Indigo
+    '#A855F7', // Purple
+    '#06B6D4', // Cyan
+  ];
+
   useEffect(() => {
     if (showChart && chartMode === 'compare') {
       fetchCompareCapitalData();
@@ -353,7 +368,7 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
                       key={s.id}
                       type="monotone"
                       dataKey={`s_${s.id}`}
-                      stroke={idx % 2 === 0 ? '#FFD700' : '#10B981'}
+                      stroke={CHART_COLORS[idx % CHART_COLORS.length]}
                       strokeWidth={2}
                       dot={false}
                       name={s.name}

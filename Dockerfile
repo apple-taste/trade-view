@@ -11,8 +11,8 @@ RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
 # 复制前端源代码并构建
 COPY frontend/ .
-# 强制刷新缓存: v1.1.3-fix
-ENV FORCE_REBUILD=20260115-1500
+# 强制刷新缓存: v1.1.4-optimization
+ENV FORCE_REBUILD=20260116-1000
 RUN npm run build
 
 # 生产阶段：运行后端并服务前端

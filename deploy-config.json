@@ -7,6 +7,6 @@
   "env_vars": {
     "NODE_ENV": "production",
     "LOG_LEVEL": "info",
-    "FORCE_REBUILD": "2026-01-15-v5-$(date +%s)"
+    "FORCE_REBUILD": "2026-01-16-v1-$(date +%s)"
   }
 }
