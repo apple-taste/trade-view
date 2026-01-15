@@ -57,9 +57,6 @@ async def lifespan(app: FastAPI):
     
     logger.info("📋 [环境变量] 关键配置检查:")
     logger.info(f"   • AI_BUILDER_TOKEN: {'✅ 已配置' if ai_token else '❌ 未配置'}")
-    if ai_token:
-        logger.info(f"   • Token前缀: {ai_token[:20]}...")
-        logger.info(f"   • Token长度: {len(ai_token)}字符")
     logger.info(f"   • SMTP_SERVER: {'✅ 已配置' if smtp_server else '⚠️  未配置（邮件功能将不可用）'}")
     
     # 列出所有环境变量（仅显示AI_BUILDER和SMTP相关的，保护隐私）
@@ -69,7 +66,7 @@ async def lifespan(app: FastAPI):
         for key in sorted(env_vars.keys()):
             value = env_vars[key]
             if 'TOKEN' in key or 'PASSWORD' in key:
-                display_value = f"{value[:20]}..." if len(value) > 20 else "***"
+                display_value = "***"
             else:
                 display_value = value
             logger.info(f"   • {key}: {display_value}")
@@ -107,7 +104,6 @@ async def lifespan(app: FastAPI):
     logger.info("🤖 [AI配置] 正在检查AI配置...")
     if ai_token:
         logger.info("✅ [AI配置] AI Builder Token已配置 - GPT-5分析功能已启用")
-        logger.info(f"🔑 [AI配置] Token前缀: {ai_token[:20]}...")
         logger.info(f"🌐 [AI配置] API端点: https://space.ai-builders.com/backend/v1/chat/completions")
         logger.info(f"🤖 [AI配置] 模型: gpt-5")
     else:

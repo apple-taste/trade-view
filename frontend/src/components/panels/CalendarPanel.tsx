@@ -15,7 +15,7 @@ export default function CalendarPanel({ selectedDate, onDateChange, apiBase = '/
   const [currentMonth, setCurrentMonth] = useState(new Date(selectedDate));
   const [tradeDates, setTradeDates] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
-  const { _calendarRefreshKey } = useTrade();
+  const { _calendarRefreshKey, effectiveStrategyId, effectiveForexStrategyId } = useTrade();
 
   useEffect(() => {
     fetchTradeDates();
@@ -29,7 +29,25 @@ export default function CalendarPanel({ selectedDate, onDateChange, apiBase = '/
   const fetchTradeDates = async () => {
     setLoading(true);
     try {
-      const response = await axios.get(`${apiBase}/dates`);
+      if (apiBase === '/api/trades' && effectiveStrategyId == null) {
+        setTradeDates(new Set());
+        return;
+      }
+      if (apiBase === '/api/forex/trades' && effectiveForexStrategyId == null) {
+        setTradeDates(new Set());
+        return;
+      }
+      const params =
+        apiBase === '/api/trades'
+          ? effectiveStrategyId != null
+            ? { strategy_id: effectiveStrategyId }
+            : undefined
+          : apiBase === '/api/forex/trades'
+            ? effectiveForexStrategyId != null
+              ? { strategy_id: effectiveForexStrategyId }
+              : undefined
+            : undefined;
+      const response = await axios.get(`${apiBase}/dates`, { params });
       setTradeDates(new Set(response.data));
     } catch (error) {
       console.error('获取交易日期失败:', error);

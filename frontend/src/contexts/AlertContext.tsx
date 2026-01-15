@@ -36,33 +36,8 @@ export function AlertProvider({ children }: { children: ReactNode }) {
   const volumeRef = useRef<number>(volume);  // 使用ref存储音量，确保获取最新值
   const soundEnabledRef = useRef<boolean>(soundEnabled);  // 使用ref存储音效开关状态
   
-  // 初始化音频（可选，如果jojo-alert.mp3存在）
   useEffect(() => {
-    // 尝试加载自定义音频，但不强制要求
-    const audio = new Audio('/jojo-alert.mp3');
-    audio.volume = volume;
-    
-    // 监听加载错误 - 静默失败，使用内置音效
-    audio.addEventListener('error', () => {
-      // 不再输出警告，直接使用内置音效
-      audioRef.current = null;
-    });
-    
-    audio.addEventListener('canplaythrough', () => {
-      // 只有成功加载才设置引用和输出日志
-      console.log('✅ 使用自定义JOJO音频文件');
-      audioRef.current = audio;
-    });
-    
-    // 尝试加载（不阻塞）
-    audio.load();
-    
-    return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
-    };
+    audioRef.current = null;
   }, []);
   
   // 同步 ref 值

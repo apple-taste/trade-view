@@ -35,7 +35,8 @@ import json
 import sys
 from datetime import datetime
 try:
-    data = json.load(sys.stdin)
+    raw = sys.stdin.read()
+    data = json.loads(raw)
     print(f'  服务名: {data.get(\"service_name\", \"N/A\")}')
     print(f'  状态: {data.get(\"status\", \"N/A\")}')
     print(f'  Koyeb状态: {data.get(\"koyeb_status\", \"N/A\")}')
@@ -46,6 +47,9 @@ try:
     print(f'  最后部署: {data.get(\"last_deployed_at\", \"N/A\")}')
     print(f'  更新时间: {data.get(\"updated_at\", \"N/A\")}')
     print(f'  消息: {data.get(\"message\", \"N/A\")}')
+except json.JSONDecodeError:
+    print(f'❌ 错误: 无法解析响应为JSON')
+    print(f'  原始响应: {raw[:500]}...')
 except Exception as e:
     print(f'❌ 错误: {e}')
 "
@@ -59,7 +63,8 @@ curl -s -X GET "${BASE_URL}/deployments/${SERVICE_NAME}/logs?log_type=build&time
 import json
 import sys
 try:
-    data = json.load(sys.stdin)
+    raw = sys.stdin.read()
+    data = json.loads(raw)
     logs = data.get('logs', '')
     if logs:
         # 只显示最后1000行
@@ -71,6 +76,9 @@ try:
             print(logs)
     else:
         print('  没有构建日志')
+except json.JSONDecodeError:
+    print(f'❌ 错误: 无法解析响应为JSON')
+    print(f'  原始响应: {raw[:200]}...')
 except Exception as e:
     print(f'❌ 错误: {e}')
 "
@@ -84,7 +92,8 @@ curl -s -X GET "${BASE_URL}/deployments/${SERVICE_NAME}/logs?log_type=runtime&st
 import json
 import sys
 try:
-    data = json.load(sys.stdin)
+    raw = sys.stdin.read()
+    data = json.loads(raw)
     logs = data.get('logs', '')
     if logs:
         # 只显示最后500行
@@ -96,6 +105,9 @@ try:
             print(logs)
     else:
         print('  没有错误日志')
+except json.JSONDecodeError:
+    print(f'❌ 错误: 无法解析响应为JSON')
+    print(f'  原始响应: {raw[:200]}...')
 except Exception as e:
     print(f'❌ 错误: {e}')
 "

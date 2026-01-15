@@ -90,7 +90,7 @@ interface StockStatistics {
 }
 
 export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelProps) {
-  const { confirm, Modal } = useJojoModal();
+  const { confirm, prompt, Modal } = useJojoModal();
   // 缓存交易记录: 日期 -> 交易列表
   const tradesCache = useRef<Record<string, Trade[]>>({});
   const [trades, setTrades] = useState<Trade[]>([]);
@@ -117,20 +117,19 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
     _tradeHistoryRefreshKey, 
     setLastAddedTrade,
     setLastUpdatedTrade,
-    setLastDeletedTradeId
+    setLastDeletedTradeId,
+    strategies,
+    effectiveStrategyId,
+    setCurrentStrategyId,
+    createStrategy,
+    deleteStrategy
   } = useTrade();
   const { clearAlertsByStockCode } = useAlerts();
 
-  // 监听外部刷新信号，清除缓存并刷新
-  useEffect(() => {
-    if (_tradeHistoryRefreshKey > 0) {
-      // 清除当前日期缓存
-      if (selectedDate && tradesCache.current[selectedDate]) {
-        delete tradesCache.current[selectedDate];
-      }
-      fetchTrades(true);
-    }
-  }, [_tradeHistoryRefreshKey]);
+  const getCacheKey = useCallback(
+    (dateStr: string) => `${effectiveStrategyId ?? 'default'}_${dateStr}`,
+    [effectiveStrategyId]
+  );
 
   // 将选中日期转换为北京时间格式（用于datetime-local输入框）
   const getSelectedDateBeijingTime = (): string => {
@@ -192,15 +191,24 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
   }, [formData.risk_per_trade, formData.buy_price, formData.stop_loss_price, sharesManuallySet]);
 
   const fetchTrades = useCallback(async (forceRefresh = false) => {
+    const cacheKey = getCacheKey(selectedDate);
     // 如果是日期视图且有缓存，优先使用缓存
-    if (viewMode === 'date' && !forceRefresh && tradesCache.current[selectedDate]) {
-      const cachedData = tradesCache.current[selectedDate];
+    if (viewMode === 'date' && !forceRefresh && tradesCache.current[cacheKey]) {
+      const cachedData = tradesCache.current[cacheKey];
       setTrades(cachedData);
       setStockStatistics(null);
       return;
     }
 
     setLoading(true);
+    if (effectiveStrategyId == null) {
+      setTrades([]);
+      setTotalPages(0);
+      setTotalItems(0);
+      setStockStatistics(null);
+      setLoading(false);
+      return;
+    }
     // 性能监控开始
     const perfLabel = viewMode === 'all' ? `TradeHistory_FetchAll_Page${page}` : `TradeHistory_FetchDate_${selectedDate}`;
     perfMonitor.start(perfLabel);
@@ -208,7 +216,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
     try {
       if (viewMode === 'all') {
         const response = await axios.get('/api/trades', {
-          params: { page, page_size: pageSize }
+          params: { page, page_size: pageSize, strategy_id: effectiveStrategyId }
         });
         
         // 处理分页响应
@@ -225,10 +233,12 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
         
         setStockStatistics(null);
       } else {
-        const response = await axios.get(`/api/trades/date/${selectedDate}`);
+        const response = await axios.get(`/api/trades/date/${selectedDate}`, {
+          params: { strategy_id: effectiveStrategyId },
+        });
         const data = response.data;
         // 更新缓存
-        tradesCache.current[selectedDate] = data;
+        tradesCache.current[cacheKey] = data;
         setTrades(data);
         setStockStatistics(null);
       }
@@ -238,11 +248,30 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       perfMonitor.end(perfLabel);
       setLoading(false);
     }
-  }, [selectedDate, viewMode, page, pageSize]);
+  }, [effectiveStrategyId, getCacheKey, page, pageSize, selectedDate, viewMode]);
+
+  // 监听外部刷新信号，清除缓存并刷新
+  useEffect(() => {
+    if (_tradeHistoryRefreshKey > 0) {
+      if (selectedDate) {
+        const key = getCacheKey(selectedDate);
+        if (tradesCache.current[key]) {
+          delete tradesCache.current[key];
+        }
+      }
+      fetchTrades(true);
+    }
+  }, [_tradeHistoryRefreshKey, fetchTrades, getCacheKey, selectedDate]);
 
   const fetchStockCodes = async () => {
     try {
-      const response = await axios.get('/api/trades/stock-codes');
+      if (effectiveStrategyId == null) {
+        setStockCodes([]);
+        return;
+      }
+      const response = await axios.get('/api/trades/stock-codes', {
+        params: { strategy_id: effectiveStrategyId },
+      });
       setStockCodes(response.data);
     } catch (error) {
       console.error('获取股票代码列表失败:', error);
@@ -252,7 +281,15 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
   const fetchTradesByStockCode = async (stockCode: string) => {
     setLoading(true);
     try {
-      const response = await axios.get(`/api/trades/stock/${stockCode}`);
+      if (effectiveStrategyId == null) {
+        setTrades([]);
+        setStockStatistics(null);
+        setSelectedStockName(null);
+        return;
+      }
+      const response = await axios.get(`/api/trades/stock/${stockCode}`, {
+        params: { strategy_id: effectiveStrategyId },
+      });
       setTrades(response.data.trades);
       setStockStatistics(response.data.statistics);
       // 从交易记录中获取股票名称（取第一条记录的股票名称）
@@ -287,6 +324,32 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
   }, [viewMode]);
 
   useEffect(() => {
+    tradesCache.current = {};
+    setSelectedStockCode(null);
+    setSelectedStockName(null);
+    setStockStatistics(null);
+    if (viewMode === 'all') {
+      fetchStockCodes();
+    } else {
+      fetchTrades(true);
+    }
+  }, [effectiveStrategyId]);
+
+  const handleCreateStrategy = async () => {
+    const name = await prompt('⭐ 新建策略', '请输入策略名称', '', '例如：短线低吸');
+    if (!name) return;
+    await createStrategy(name);
+  };
+
+  const handleDeleteCurrentStrategy = async () => {
+    const current = effectiveStrategyId != null ? strategies.find((s) => s.id === effectiveStrategyId) : null;
+    if (!current) return;
+    const ok = await confirm('🗑️ 删除策略', `确定删除策略「${current.name}」吗？\n\n该策略下交易将被清空（软删除），资金曲线记录也会删除。`);
+    if (!ok) return;
+    await deleteStrategy(current.id);
+  };
+
+  useEffect(() => {
     if (viewMode === 'all' && selectedStockCode) {
       fetchTradesByStockCode(selectedStockCode);
     } else if (viewMode === 'all' && !selectedStockCode) {
@@ -296,12 +359,17 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
 
   // 预加载相邻日期的交易记录
   useEffect(() => {
+    // 预加载相邻日期的交易记录
     if (viewMode === 'date') {
       const preloadDate = async (dateStr: string) => {
-        if (!tradesCache.current[dateStr]) {
+        if (effectiveStrategyId == null) return;
+        const key = getCacheKey(dateStr);
+        if (!tradesCache.current[key]) {
           try {
-            const response = await axios.get(`/api/trades/date/${dateStr}`);
-            tradesCache.current[dateStr] = response.data;
+            const response = await axios.get(`/api/trades/date/${dateStr}`, {
+              params: { strategy_id: effectiveStrategyId },
+            });
+            tradesCache.current[key] = response.data;
             // logger.info(`✅ [TradeHistory] 预加载成功: ${dateStr}`);
           } catch (err) {
             // 忽略预加载错误
@@ -320,11 +388,15 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
 
       return () => clearTimeout(timer);
     }
-  }, [selectedDate, viewMode]);
+  }, [effectiveStrategyId, getCacheKey, selectedDate, viewMode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      if (effectiveStrategyId == null) {
+        alert('请先创建并选择策略');
+        return;
+      }
       // 将北京时间转换为UTC时间发送给后端
       const utcTimeString = beijingTimeToUTC(formData.open_time);
       
@@ -351,6 +423,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
         open_time: utcTimeString,
         close_time: utcCloseTimeString || undefined  // 明确设置为 undefined 如果为空
       };
+      data.strategy_id = effectiveStrategyId;
       
       // 编辑时不需要发送 risk_per_trade
       if (editingTrade) {
@@ -380,9 +453,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       resetForm();
       
       // 清除当前日期缓存，确保获取最新数据
-      if (selectedDate && tradesCache.current[selectedDate]) {
-        delete tradesCache.current[selectedDate];
-      }
+      tradesCache.current = {};
 
       // 优化：并行刷新相关面板，减少等待时间
       Promise.all([
@@ -453,12 +524,16 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
     
     try {
       logger.info('🗑️ [TradeHistory] 清空所有交易记录（后端一次性处理）...');
-      const res = await axios.delete('/api/trades/clear-all');
+      const res = await axios.delete('/api/trades/clear-all', {
+        params: { strategy_id: effectiveStrategyId ?? undefined },
+      });
 
       // 等待后端重算落库
       await new Promise(resolve => setTimeout(resolve, 400));
 
       alert(`✅ 已清空交易记录\n\n删除数量：${res.data?.deleted_count ?? 0}\n💡 总资产已恢复到初始资金状态`);
+
+      tradesCache.current = {};
 
       // 刷新相关面板
       refreshCalendar();
@@ -514,8 +589,11 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       refreshUserPanel(); // 刷新用户面板（重新获取资金数据）
       
       // 清除缓存并强制刷新
-      if (selectedDate && tradesCache.current[selectedDate]) {
-        delete tradesCache.current[selectedDate];
+      if (selectedDate) {
+        const key = getCacheKey(selectedDate);
+        if (tradesCache.current[key]) {
+          delete tradesCache.current[key];
+        }
       }
       fetchTrades(true); // 刷新当前列表
       
@@ -569,6 +647,31 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       <div className="flex items-center mb-2 gap-2">
         <div className="flex items-center space-x-2 flex-shrink-0">
           <h2 className="jojo-title text-lg whitespace-nowrap">开仓记录历史</h2>
+          <div className="flex items-center space-x-1">
+            <select
+              value={effectiveStrategyId ?? ''}
+              onChange={(e) => setCurrentStrategyId(e.target.value ? Number(e.target.value) : null)}
+              className="jojo-input text-xs py-1"
+            >
+              <option value="">请选择策略</option>
+              {strategies.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+            <button onClick={handleCreateStrategy} className="jojo-button text-xs px-2 py-1" title="新建策略">
+              新建
+            </button>
+            <button
+              onClick={handleDeleteCurrentStrategy}
+              className="jojo-button-danger text-xs px-2 py-1"
+              title="删除当前策略"
+              disabled={!effectiveStrategyId}
+            >
+              删除
+            </button>
+          </div>
           <div className="flex items-center space-x-1 bg-jojo-blue-light rounded p-0.5 border border-jojo-gold">
             <button
               onClick={() => setViewMode('date')}

@@ -30,7 +30,6 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
   const { user } = useAuth();
   const { confirm, Modal } = useJojoModal();
   const { openModal: openCapitalModal, Modal: CapitalModal } = useJojoCapitalModal();
-  // const [capital, setCapital] = useState<number>(0);  // 未使用，注释掉避免lint错误
   const [capitalInfo, setCapitalInfo] = useState<CapitalInfo>({
     capital: 0,
     total_assets: 0,
@@ -38,14 +37,22 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
     position_value: 0
   });
   const [history, setHistory] = useState<CapitalHistory[]>([]);
+  const [chartMode, setChartMode] = useState<'single' | 'compare'>('single');
+  const [period, setPeriod] = useState<'1m' | '3m' | '6m' | '1y' | 'all'>('all');
+  const [compareData, setCompareData] = useState<any[]>([]);
+  const [compareStrategies, setCompareStrategies] = useState<Array<{ id: number; name: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [emailAlertsEnabled, setEmailAlertsEnabled] = useState<boolean>(false);
-  const { _userPanelRefreshKey, refreshUserPanel, refreshAnalysis } = useTrade();
+  const { _userPanelRefreshKey, refreshUserPanel, refreshAnalysis, effectiveStrategyId, strategies } = useTrade();
 
   useEffect(() => {
-    fetchCapitalData();
+    if (showChart && chartMode === 'compare') {
+      fetchCompareCapitalData();
+    } else {
+      fetchCapitalData(getStartDate(period));
+    }
     fetchUserProfile();
-  }, [_userPanelRefreshKey]); // 当refresh key变化时刷新
+  }, [_userPanelRefreshKey, chartMode, period, effectiveStrategyId, showChart]); // 当refresh key变化时刷新
 
   const fetchUserProfile = async () => {
     try {
@@ -56,12 +63,38 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
     }
   };
 
-  const fetchCapitalData = async () => {
+  const getStartDate = (p: '1m' | '3m' | '6m' | '1y' | 'all') => {
+    if (p === 'all') return undefined;
+    const d = new Date();
+    if (p === '1y') d.setFullYear(d.getFullYear() - 1);
+    if (p === '6m') d.setMonth(d.getMonth() - 6);
+    if (p === '3m') d.setMonth(d.getMonth() - 3);
+    if (p === '1m') d.setMonth(d.getMonth() - 1);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const fetchCapitalData = async (startDate?: string) => {
     try {
       logger.info('💰 [UserPanel] 获取资金数据...');
+      if (effectiveStrategyId == null) {
+        setCapitalInfo({
+          capital: 0,
+          total_assets: 0,
+          available_funds: 0,
+          position_value: 0,
+        });
+        setHistory([]);
+        return;
+      }
+      const params: any = {};
+      if (effectiveStrategyId != null) params.strategy_id = effectiveStrategyId;
+      if (startDate) params.start_date = startDate;
       const [capitalRes, historyRes] = await Promise.all([
-        axios.get('/api/user/capital'),
-        axios.get('/api/user/capital-history')
+        axios.get('/api/user/capital', { params }),
+        axios.get('/api/user/capital-history', { params })
       ]);
       logger.info('✅ [UserPanel] 资金数据获取成功', {
         total_assets: capitalRes.data.total_assets,
@@ -69,7 +102,6 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
         position_value: capitalRes.data.position_value,
         historyCount: historyRes.data.length
       });
-      // setCapital(capitalRes.data.capital);  // capital state已注释，不再需要
       setCapitalInfo({
         capital: capitalRes.data.capital,
         total_assets: capitalRes.data.total_assets || capitalRes.data.capital,
@@ -79,6 +111,36 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
       setHistory(historyRes.data);
     } catch (error: any) {
       logger.error('❌ [UserPanel] 获取资金数据失败', error.response?.data || error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchCompareCapitalData = async () => {
+    try {
+      const startDate = getStartDate(period);
+      const params: any = { market: 'stock' };
+      if (startDate) params.start_date = startDate;
+      const res = await axios.get('/api/user/strategies/capital-histories', { params });
+      const seriesById = (res.data?.series_by_strategy_id ?? {}) as Record<string, Array<{ date: string; capital: number }>>;
+      const strat = (res.data?.strategies ?? []) as Array<{ id: number; name: string }>;
+      setCompareStrategies(strat.map((s) => ({ id: s.id, name: s.name })));
+
+      const rowsByDate = new Map<string, any>();
+      for (const s of strat) {
+        const series = seriesById[String(s.id)] ?? [];
+        for (const p of series) {
+          const row = rowsByDate.get(p.date) ?? { date: p.date };
+          row[`s_${s.id}`] = p.capital;
+          rowsByDate.set(p.date, row);
+        }
+      }
+      const rows = Array.from(rowsByDate.values()).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+      setCompareData(rows);
+    } catch (error: any) {
+      logger.error('❌ [UserPanel] 获取策略对比资金曲线失败', error.response?.data || error.message);
+      setCompareData([]);
+      setCompareStrategies([]);
     } finally {
       setLoading(false);
     }
@@ -115,6 +177,10 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
   const handleUpdateCapital = async () => {
     logger.info('🖱️ [UserPanel] 点击更新资金按钮');
     try {
+      if (effectiveStrategyId == null) {
+        await confirm('⚠️ 需要策略', '请先创建并选择策略后再设置资金锚点');
+        return;
+      }
       const result = await openCapitalModal();
       
       if (!result) {
@@ -151,7 +217,8 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
         requestBody.date = updateDate;
       }
       
-      const response = await axios.post('/api/user/capital', requestBody);
+      const params = effectiveStrategyId != null ? { strategy_id: effectiveStrategyId } : undefined;
+      const response = await axios.post('/api/user/capital', requestBody, { params });
       logger.info('✅ [UserPanel] 初始资金设置成功', response.data);
       
       // 触发所有相关面板的刷新
@@ -160,7 +227,11 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
       
       // 等待一小段时间确保后端已完成资金曲线重新计算
       setTimeout(() => {
-        fetchCapitalData();
+        if (showChart && chartMode === 'compare') {
+          fetchCompareCapitalData();
+        } else {
+          fetchCapitalData(getStartDate(period));
+        }
       }, 500);
     } catch (error: any) {
       logger.error('❌ [UserPanel] 资金设置失败', error);
@@ -232,9 +303,71 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
     return (
       <>
       <div className="jojo-card p-3 h-full flex flex-col">
-        <h2 className="jojo-title text-lg mb-2">资金成长曲线</h2>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="jojo-title text-lg">资金成长曲线</h2>
+          <div className="flex items-center gap-2">
+            <select
+              value={chartMode}
+              onChange={(e) => {
+                const next = e.target.value === 'compare' ? 'compare' : 'single';
+                setLoading(true);
+                setChartMode(next);
+                if (next === 'compare' && strategies.length < 2) {
+                  setChartMode('single');
+                }
+              }}
+              className="jojo-input text-xs py-1"
+              disabled={strategies.length < 2}
+            >
+              <option value="single">当前策略</option>
+              <option value="compare">全部策略对比</option>
+            </select>
+            <select value={period} onChange={(e) => setPeriod(e.target.value as any)} className="jojo-input text-xs py-1">
+              <option value="1m">近1月</option>
+              <option value="3m">近3月</option>
+              <option value="6m">近6月</option>
+              <option value="1y">近1年</option>
+              <option value="all">全部</option>
+            </select>
+          </div>
+        </div>
         <div className="flex-1 min-h-[160px]">
-          {history.length > 0 ? (
+          {chartMode === 'compare' ? (
+            compareData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={compareData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#FFD700" opacity={0.3} />
+                  <XAxis dataKey="date" stroke="#FFD700" style={{ fill: '#FFD700' }} />
+                  <YAxis stroke="#FFD700" style={{ fill: '#FFD700' }} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#1a1a2e',
+                      border: '2px solid #FFD700',
+                      borderRadius: '8px',
+                      color: '#FFD700'
+                    }}
+                  />
+                  <Legend wrapperStyle={{ color: '#FFD700' }} />
+                  {compareStrategies.map((s, idx) => (
+                    <Line
+                      key={s.id}
+                      type="monotone"
+                      dataKey={`s_${s.id}`}
+                      stroke={idx % 2 === 0 ? '#FFD700' : '#10B981'}
+                      strokeWidth={2}
+                      dot={false}
+                      name={s.name}
+                      connectNulls
+                    />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-400 text-sm">
+                <p>暂无资金历史数据</p>
+              </div>
+            )
+          ) : history.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={history}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#FFD700" opacity={0.3} />

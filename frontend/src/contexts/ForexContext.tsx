@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from 'react';
 import axios from 'axios';
+import { useTrade } from './TradeContext';
 
 export type ForexSide = 'BUY' | 'SELL';
 export type ForexTradeStatus = 'open' | 'closed';
@@ -65,6 +66,7 @@ export type ForexTradeCreatePayload = {
   commission?: number;
   swap?: number;
   notes?: string;
+  strategy_id?: number;
 };
 
 export type ForexTradeClosePayload = {
@@ -157,6 +159,7 @@ const mapTrade = (data: any): ForexTrade => {
 };
 
 export function ForexProvider({ children }: { children: ReactNode }) {
+  const { effectiveForexStrategyId } = useTrade();
   const [account, setAccount] = useState<ForexAccount>({
     currency: 'USD',
     leverage: 100,
@@ -177,11 +180,19 @@ export function ForexProvider({ children }: { children: ReactNode }) {
   const [refreshKey, setRefreshKey] = useState(0);
 
   const refresh = async () => {
+    if (effectiveForexStrategyId == null) {
+      setOpenTrades([]);
+      setClosedTrades([]);
+      setCapitalHistory([]);
+      return;
+    }
+
+    const commonParams = { strategy_id: effectiveForexStrategyId };
     const [accountRes, positionsRes, tradesRes, capitalRes] = await Promise.all([
-      axios.get('/api/forex/account'),
-      axios.get('/api/forex/positions'),
-      axios.get('/api/forex/trades', { params: { page: 1, page_size: 500 } }),
-      axios.get('/api/forex/capital-history'),
+      axios.get('/api/forex/account', { params: commonParams }),
+      axios.get('/api/forex/positions', { params: commonParams }),
+      axios.get('/api/forex/trades', { params: { ...commonParams, page: 1, page_size: 500 } }),
+      axios.get('/api/forex/capital-history', { params: commonParams }),
     ]);
 
     setAccount(mapAccount(accountRes.data));
@@ -202,53 +213,68 @@ export function ForexProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     refresh().catch(() => {});
-  }, []);
+  }, [effectiveForexStrategyId]);
 
   const createTrade = async (payload: ForexTradeCreatePayload) => {
-    await axios.post('/api/forex/trades', payload);
+    if (effectiveForexStrategyId == null) throw new Error('请先创建并选择策略');
+    await axios.post(
+      '/api/forex/trades',
+      { ...payload, strategy_id: effectiveForexStrategyId },
+      { params: { strategy_id: effectiveForexStrategyId } }
+    );
     await refresh();
     setRefreshKey((v) => v + 1);
   };
 
   const closeTrade = async (tradeId: number, payload: ForexTradeClosePayload) => {
-    await axios.post(`/api/forex/trades/${tradeId}/close`, payload);
+    if (effectiveForexStrategyId == null) throw new Error('请先创建并选择策略');
+    await axios.post(`/api/forex/trades/${tradeId}/close`, payload, { params: { strategy_id: effectiveForexStrategyId } });
     await refresh();
     setRefreshKey((v) => v + 1);
   };
 
   const updateTrade = async (tradeId: number, payload: ForexTradeUpdatePayload) => {
-    await axios.patch(`/api/forex/trades/${tradeId}`, payload);
+    if (effectiveForexStrategyId == null) throw new Error('请先创建并选择策略');
+    await axios.patch(`/api/forex/trades/${tradeId}`, payload, { params: { strategy_id: effectiveForexStrategyId } });
     await refresh();
     setRefreshKey((v) => v + 1);
   };
 
   const deleteTrade = async (tradeId: number) => {
-    await axios.delete(`/api/forex/trades/${tradeId}`);
+    if (effectiveForexStrategyId == null) throw new Error('请先创建并选择策略');
+    await axios.delete(`/api/forex/trades/${tradeId}`, { params: { strategy_id: effectiveForexStrategyId } });
     await refresh();
     setRefreshKey((v) => v + 1);
   };
 
   const clearAllTrades = async () => {
-    const res = await axios.delete('/api/forex/trades/clear-all');
+    if (effectiveForexStrategyId == null) throw new Error('请先创建并选择策略');
+    const res = await axios.delete('/api/forex/trades/clear-all', { params: { strategy_id: effectiveForexStrategyId } });
     await refresh();
     setRefreshKey((v) => v + 1);
     return { deleted_count: Number(res.data?.deleted_count ?? 0) };
   };
 
   const updateAccount = async (payload: ForexAccountUpdatePayload) => {
-    const res = await axios.patch('/api/forex/account', payload);
+    const res = await axios.patch('/api/forex/account', payload, {
+      params: effectiveForexStrategyId != null ? { strategy_id: effectiveForexStrategyId } : undefined,
+    });
     setAccount(mapAccount(res.data));
     await refresh();
   };
 
   const setInitialCapital = async (payload: ForexInitialCapitalPayload) => {
-    await axios.post('/api/forex/account/initial', payload);
+    await axios.post('/api/forex/account/initial', payload, {
+      params: effectiveForexStrategyId != null ? { strategy_id: effectiveForexStrategyId } : undefined,
+    });
     await refresh();
     setRefreshKey((v) => v + 1);
   };
 
   const resetAccount = async (payload: ForexAccountResetPayload) => {
-    await axios.post('/api/forex/account/reset', payload);
+    await axios.post('/api/forex/account/reset', payload, {
+      params: effectiveForexStrategyId != null ? { strategy_id: effectiveForexStrategyId } : undefined,
+    });
     setOpenTrades([]);
     setClosedTrades([]);
     setCapitalHistory([]);

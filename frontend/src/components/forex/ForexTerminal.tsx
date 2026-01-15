@@ -3,6 +3,7 @@ import { useForex, type ForexTrade, type ForexSide, type ForexQuote } from '../.
 import { useLocale } from '../../contexts/LocaleContext';
 import { Plus, X, Edit, Trash2, CheckCircle2 } from 'lucide-react';
 import { useJojoModal } from '../JojoModal';
+import { useTrade } from '../../contexts/TradeContext';
 
 type ActiveTab = 'OPEN' | 'CLOSED';
 
@@ -49,7 +50,8 @@ const displayTime = (value?: string | null) => {
 export default function ForexTerminal() {
   const { account, openTrades, closedTrades, createTrade, closeTrade, updateTrade, deleteTrade, clearAllTrades, fetchQuotes, refresh } = useForex();
   const { t } = useLocale();
-  const { confirm: jojoConfirm, Modal } = useJojoModal();
+  const { confirm: jojoConfirm, prompt: jojoPrompt, Modal } = useJojoModal();
+  const { forexStrategies, effectiveForexStrategyId, setCurrentForexStrategyId, createForexStrategy, deleteForexStrategy } = useTrade();
   const [activeTab, setActiveTab] = useState<ActiveTab>('OPEN');
   const [createOpen, setCreateOpen] = useState(false);
   const [closeTarget, setCloseTarget] = useState<ForexTrade | null>(null);
@@ -268,10 +270,61 @@ export default function ForexTerminal() {
     }
   };
 
+  const handleCreateStrategy = async () => {
+    const name = await jojoPrompt('✨ 新建策略', '请输入策略名称');
+    if (!name) return;
+    const created = await createForexStrategy(name);
+    if (!created?.id) return;
+    setCurrentForexStrategyId(created.id);
+  };
+
+  const handleDeleteCurrentStrategy = async () => {
+    const current =
+      effectiveForexStrategyId != null ? forexStrategies.find((s) => s.id === effectiveForexStrategyId) : null;
+    if (!current) return;
+    const ok = await jojoConfirm('🗑️ 删除策略', `确定删除策略「${current.name}」吗？\n\n删除后将软删除该策略下所有外汇交易记录。`);
+    if (!ok) return;
+    await deleteForexStrategy(current.id);
+  };
+
   return (
     <div className="h-full bg-gray-800 rounded-lg border border-gray-700 flex flex-col overflow-hidden">
       <div className="p-2 bg-gray-900 border-b border-gray-700 flex items-center justify-between">
         <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 mr-2">
+            <select
+              value={effectiveForexStrategyId ?? ''}
+              onChange={(e) => {
+                const raw = e.target.value;
+                setCurrentForexStrategyId(raw ? Number(raw) : null);
+              }}
+              className="px-2 py-1 text-xs font-bold rounded bg-gray-800 border border-gray-700 text-gray-200 focus:outline-none focus:ring-1 focus:ring-jojo-gold"
+            >
+              <option value="">请选择策略</option>
+              {forexStrategies.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={handleCreateStrategy}
+              className="px-2 py-1 text-xs font-bold rounded bg-jojo-gold text-gray-900 hover:bg-yellow-400 transition-colors"
+            >
+              新建
+            </button>
+            <button
+              onClick={handleDeleteCurrentStrategy}
+              disabled={effectiveForexStrategyId == null}
+              className={`px-2 py-1 text-xs font-bold rounded transition-colors ${
+                effectiveForexStrategyId == null
+                  ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                  : 'bg-red-500/20 text-red-300 hover:bg-red-500/30'
+              }`}
+            >
+              删除
+            </button>
+          </div>
           <button
             onClick={() => setActiveTab('OPEN')}
             className={`px-3 py-1 text-xs font-bold rounded transition-colors ${

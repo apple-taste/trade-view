@@ -47,14 +47,20 @@ export default function AnalysisPanel({ isMinimized = false, onToggleMinimize, s
   const [analysis, setAnalysis] = useState<AnalysisData>(EMPTY_ANALYSIS);
   const [loading, setLoading] = useState(true); // 初始为true，自动加载统计摘要
   const [aiLoading, setAiLoading] = useState(false);
-  const { _analysisRefreshKey } = useTrade();
+  const { _analysisRefreshKey, effectiveStrategyId, effectiveForexStrategyId } = useTrade();
 
   // 获取统计摘要（本地计算，不调用AI）
   const fetchSummary = useCallback(async () => {
     setLoading(true);
     try {
+      const selectedStrategyId = systemMode === 'forex' ? effectiveForexStrategyId : effectiveStrategyId;
+      if (selectedStrategyId == null) {
+        setAnalysis(EMPTY_ANALYSIS);
+        return;
+      }
+      const params: any = { use_ai: false, system_mode: systemMode, strategy_id: selectedStrategyId };
       const response = await axios.get('/api/analysis/trade-summary', {
-        params: { use_ai: false, system_mode: systemMode },
+        params,
       });
       setAnalysis(response.data);
     } catch (error) {
@@ -63,7 +69,7 @@ export default function AnalysisPanel({ isMinimized = false, onToggleMinimize, s
     } finally {
       setLoading(false);
     }
-  }, [systemMode]);
+  }, [effectiveForexStrategyId, effectiveStrategyId, systemMode]);
 
   // 自动获取统计摘要（本地计算，不调用AI）
   useEffect(() => {
@@ -74,8 +80,14 @@ export default function AnalysisPanel({ isMinimized = false, onToggleMinimize, s
   const fetchAiAnalysis = async () => {
     setAiLoading(true);
     try {
+      const selectedStrategyId = systemMode === 'forex' ? effectiveForexStrategyId : effectiveStrategyId;
+      if (selectedStrategyId == null) {
+        alert('请先创建并选择策略');
+        return;
+      }
+      const params: any = { use_ai: true, system_mode: systemMode, strategy_id: selectedStrategyId };
       const response = await axios.get('/api/analysis/trade-summary', {
-        params: { use_ai: true, system_mode: systemMode },
+        params,
       });
       setAnalysis(response.data);
     } catch (error) {

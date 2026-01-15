@@ -96,7 +96,7 @@ export default function JojoModal({
               onKeyDown={handleKeyDown}
               placeholder={placeholder}
               autoFocus
-              className="w-full px-4 py-3 bg-jojo-blue-darker border-2 border-jojo-gold/50 rounded-lg text-white text-lg focus:outline-none focus:border-jojo-gold transition-all"
+              className="w-full px-4 py-3 bg-jojo-blue-darker border-2 border-jojo-gold/50 rounded-lg text-white text-lg placeholder:text-gray-400 selection:bg-jojo-gold selection:text-jojo-blue focus:outline-none focus:border-jojo-gold transition-all"
               style={{
                 boxShadow: 'inset 0 2px 4px rgba(0, 0, 0, 0.3)',
               }}

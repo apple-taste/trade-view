@@ -52,6 +52,20 @@ class CapitalHistoryItem(BaseModel):
     available_funds: Optional[float] = None  # 可用资金
     position_value: Optional[float] = None  # 持仓市值
 
+# 策略相关
+class StrategyCreate(BaseModel):
+    name: str
+
+class StrategyResponse(BaseModel):
+    id: int
+    user_id: int
+    name: str
+    uid: str
+    market: str
+    initial_capital: Optional[float] = None
+    initial_date: Optional[date] = None
+    created_at: Optional[datetime] = None
+
 # 交易记录相关
 class TradeCreate(BaseModel):
     """创建交易记录模型"""
@@ -68,6 +82,7 @@ class TradeCreate(BaseModel):
     take_profit_alert: Optional[bool] = False
     notes: Optional[str] = None
     risk_per_trade: Optional[float] = None  # 单笔风险金额（可选，用于自动计算手数）
+    strategy_id: Optional[int] = None
 
     class Config:
         json_schema_extra = {
@@ -106,10 +121,12 @@ class TradeUpdate(BaseModel):
     order_result: Optional[str] = None
     notes: Optional[str] = None
     status: Optional[str] = None
+    strategy_id: Optional[int] = None
 
 class TradeResponse(BaseModel):
     id: int
     user_id: int
+    strategy_id: Optional[int] = None
     stock_code: str
     stock_name: Optional[str]
     open_time: datetime
@@ -224,6 +241,7 @@ class ForexTradeCreate(BaseModel):
     commission: Optional[float] = 0
     swap: Optional[float] = 0
     notes: Optional[str] = None
+    strategy_id: Optional[int] = None
 
 class ForexTradeUpdate(BaseModel):
     sl: Optional[float] = None
@@ -239,6 +257,7 @@ class ForexTradeClose(BaseModel):
 class ForexTradeResponse(BaseModel):
     id: int
     user_id: int
+    strategy_id: Optional[int] = None
     symbol: str
     side: str
     lots: float

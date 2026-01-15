@@ -11,6 +11,8 @@ export default {
         'jojo-gold-dark': '#FFA500',
         'jojo-blue': '#1a1a2e',
         'jojo-blue-light': '#16213e',
+        'jojo-blue-dark': '#0f3460',
+        'jojo-blue-darker': '#0f0a24',
         'jojo-red': '#c41e3a',
         'jojo-red-dark': '#8b0000',
         'jojo-purple': '#6a0dad',

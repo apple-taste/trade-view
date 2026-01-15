@@ -10,7 +10,7 @@ from app.database import get_db, Trade, CapitalHistory
 from app.middleware.auth import get_current_user
 from app.models import TradeCreate, TradeUpdate, TradeResponse, PaginatedTradeResponse
 from app.database import User
-from app.routers.user import recalculate_capital_history
+from app.routers.user import recalculate_capital_history, recalculate_strategy_capital_history, _get_stock_strategy
 from app.services.commission_calculator import default_calculator
 from app.services.price_monitor import price_monitor
 
@@ -35,14 +35,20 @@ router = APIRouter()
 async def get_all_trades(
     page: int = 1,
     page_size: int = 50,
+    strategy_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    strategy = await _get_stock_strategy(db, current_user, strategy_id)
     # 计算总数
     count_result = await db.execute(
         select(func.count())
         .select_from(Trade)
-        .where(Trade.user_id == current_user.id, Trade.is_deleted == False)
+        .where(
+            Trade.user_id == current_user.id,
+            Trade.strategy_id == strategy.id,
+            Trade.is_deleted == False,
+        )
     )
     total = count_result.scalar()
     
@@ -52,7 +58,11 @@ async def get_all_trades(
     # 查询数据
     result = await db.execute(
         select(Trade)
-        .where(Trade.user_id == current_user.id, Trade.is_deleted == False)
+        .where(
+            Trade.user_id == current_user.id,
+            Trade.strategy_id == strategy.id,
+            Trade.is_deleted == False,
+        )
         .order_by(Trade.open_time.desc())
         .offset(offset)
         .limit(page_size)
@@ -123,6 +133,7 @@ async def get_all_trades(
 )
 async def get_trades_by_date(
     trade_date: str,
+    strategy_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -143,10 +154,12 @@ async def get_trades_by_date(
     start_datetime = beijing_start - timedelta(hours=8)
     end_datetime = beijing_end - timedelta(hours=8)
     
+    strategy = await _get_stock_strategy(db, current_user, strategy_id)
     result = await db.execute(
         select(Trade)
         .where(
             Trade.user_id == current_user.id,
+            Trade.strategy_id == strategy.id,
             Trade.open_time >= start_datetime,
             Trade.open_time < end_datetime,
             Trade.is_deleted == False  # 排除已删除的记录
@@ -305,8 +318,10 @@ async def create_trade(
         if risk > 0:
             theoretical_rrr = round(reward / risk, 2)
     
+    strategy = await _get_stock_strategy(db, current_user, trade_data.strategy_id)
     new_trade = Trade(
         user_id=current_user.id,
+        strategy_id=strategy.id,
         stock_code=trade_data.stock_code,
         stock_name=stock_name,
         open_time=open_time,
@@ -330,26 +345,7 @@ async def create_trade(
     await db.commit()
     await db.refresh(new_trade)
     
-    # 优化：仅在必要时重新计算资金曲线
-    # 由于添加交易的频率较高，我们可以延迟到用户面板请求时再计算
-    # 或者只计算受影响的日期范围，而不是整个历史
-    # 这里我们优化为异步后台任务，不阻塞API响应
-    
-    # 简化版：只重新计算从开仓日期到现在的资金曲线
-    result = await db.execute(
-        select(CapitalHistory)
-        .where(CapitalHistory.user_id == current_user.id)
-        .order_by(CapitalHistory.date.asc())
-        .limit(1)
-    )
-    initial_capital_record = result.scalar_one_or_none()
-    
-    if initial_capital_record:
-        # 使用初始资金设置的日期作为起点重新计算
-        await recalculate_capital_history(db, current_user.id, initial_capital_record.date)
-    else:
-        # 如果没有初始资金记录，使用交易的开仓日期
-        await recalculate_capital_history(db, current_user.id, open_time.date())
+    await recalculate_strategy_capital_history(db, current_user.id, strategy.id, open_time.date())
     
     # 准备返回数据（保持兼容性）
     trade_dict = new_trade.__dict__.copy()
@@ -432,10 +428,15 @@ async def update_trade(
         old_sell_commission = trade.sell_commission
         old_profit_loss = trade.profit_loss
         old_close_time = trade.close_time
+        old_strategy_id = trade.strategy_id
         
         # 更新交易记录字段
         update_data = trade_data.model_dump(exclude_unset=True)
         logger.info(f"📝 [更新交易] 接收到的更新数据: {update_data}")
+
+        if "strategy_id" in update_data and update_data["strategy_id"] is not None:
+            strategy = await _get_stock_strategy(db, current_user, int(update_data["strategy_id"]))
+            update_data["strategy_id"] = strategy.id
         
         # 处理open_time（如果提供了）- 确保是naive datetime
         if 'open_time' in update_data and update_data['open_time']:
@@ -556,22 +557,24 @@ async def update_trade(
         await db.commit()
         await db.refresh(trade)
         
-        # 如果有影响资金曲线的字段变化，需要重新计算资金曲线
-        if commission_changed or price_changed or shares_changed or sell_price_changed or sell_commission_changed or close_time_changed:
-            logger.info(f"💰 [更新交易] 检测到影响资金曲线的字段变化，重新计算资金曲线...")
-            # 找到用户设置的初始资金日期（最早的 CapitalHistory 记录）
-            result = await db.execute(
-                select(CapitalHistory)
-                .where(CapitalHistory.user_id == current_user.id)
-                .order_by(CapitalHistory.date.asc())
-                .limit(1)
-            )
-            initial_capital_record = result.scalar_one_or_none()
-            
-            if initial_capital_record:
-                # 使用初始资金设置的日期作为起点重新计算
-                await recalculate_capital_history(db, current_user.id, initial_capital_record.date)
-                logger.info(f"✅ [更新交易] 资金曲线已重新计算")
+        strategy_changed = trade.strategy_id != old_strategy_id
+        if (
+            commission_changed
+            or price_changed
+            or shares_changed
+            or sell_price_changed
+            or sell_commission_changed
+            or close_time_changed
+            or strategy_changed
+        ):
+            strategy_ids: set[int] = set()
+            if old_strategy_id is not None:
+                strategy_ids.add(int(old_strategy_id))
+            if trade.strategy_id is not None:
+                strategy_ids.add(int(trade.strategy_id))
+
+            for sid in strategy_ids:
+                await recalculate_strategy_capital_history(db, current_user.id, sid, trade.open_time.date())
         
         # 计算风险回报比
         trade_dict = trade.__dict__.copy()
@@ -597,6 +600,7 @@ async def update_trade(
 
 @router.delete("/clear-all")
 async def clear_all_trades(
+    strategy_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -605,23 +609,26 @@ async def clear_all_trades(
     - 将当前用户所有 Trade.is_deleted=False 的交易标记为 True
     - 然后从用户初始入金日期开始重算资金曲线
     """
-    # 优先使用 users.initial_capital_date 作为重算起点
-    start_date = getattr(current_user, "initial_capital_date", None)
-    if not start_date:
+    if strategy_id is not None:
+        strategy = await _get_stock_strategy(db, current_user, strategy_id)
         result = await db.execute(
-            select(CapitalHistory)
-            .where(CapitalHistory.user_id == current_user.id)
-            .order_by(CapitalHistory.date.asc())
-            .limit(1)
+            select(Trade).where(
+                Trade.user_id == current_user.id,
+                Trade.strategy_id == strategy.id,
+                Trade.is_deleted == False,
+            )
         )
-        initial_capital_record = result.scalar_one_or_none()
-        start_date = initial_capital_record.date if initial_capital_record else date.today()
+        trades = result.scalars().all()
+        for t in trades:
+            t.is_deleted = True
+            t.updated_at = datetime.utcnow()
+
+        await db.commit()
+        await recalculate_strategy_capital_history(db, current_user.id, strategy.id, date.today())
+        return {"message": "清空成功，资金曲线已重新计算", "deleted_count": len(trades)}
 
     result = await db.execute(
-        select(Trade).where(
-            Trade.user_id == current_user.id,
-            Trade.is_deleted == False
-        )
+        select(Trade).where(Trade.user_id == current_user.id, Trade.is_deleted == False)
     )
     trades = result.scalars().all()
     for t in trades:
@@ -630,8 +637,20 @@ async def clear_all_trades(
 
     await db.commit()
 
-    # 无有效交易时，recalculate_capital_history 会强制恢复为初始入金
+    start_date = getattr(current_user, "initial_capital_date", None)
+    if start_date is None:
+        start_date = date.today()
     await recalculate_capital_history(db, current_user.id, start_date)
+
+    strat_result = await db.execute(
+        select(func.distinct(Trade.strategy_id)).where(
+            Trade.user_id == current_user.id,
+            Trade.strategy_id.isnot(None),
+        )
+    )
+    strategy_ids = [row[0] for row in strat_result.fetchall() if row[0] is not None]
+    for sid in strategy_ids:
+        await recalculate_strategy_capital_history(db, current_user.id, int(sid), date.today())
 
     return {"message": "清空成功，资金曲线已重新计算", "deleted_count": len(trades)}
 
@@ -660,30 +679,14 @@ async def delete_trade(
     if not trade:
         raise HTTPException(status_code=404, detail="交易记录不存在或已被删除")
     
-    # 获取交易的开仓日期（用于确定重新计算的起点）
-    trade_open_date = trade.open_time.date() if trade.open_time else date.today()
-    
-    # 找到用户设置的初始资金日期（优先 users.initial_capital_date）
-    start_date = getattr(current_user, "initial_capital_date", None)
-    if not start_date:
-        result = await db.execute(
-            select(CapitalHistory)
-            .where(CapitalHistory.user_id == current_user.id)
-            .order_by(CapitalHistory.date.asc())
-            .limit(1)
-        )
-        initial_capital_record = result.scalar_one_or_none()
-        start_date = initial_capital_record.date if initial_capital_record else trade_open_date
-    
     # 软删除：设置 is_deleted = True
     trade.is_deleted = True
     trade.updated_at = datetime.utcnow()
     await db.commit()
     await db.refresh(trade)
     
-    # 重新计算资金曲线（从初始资金日期开始）
-    # 因为交易已被标记为删除，recalculate_capital_history 会自动排除它
-    await recalculate_capital_history(db, current_user.id, start_date)
+    strategy = await _get_stock_strategy(db, current_user, trade.strategy_id)
+    await recalculate_strategy_capital_history(db, current_user.id, strategy.id, date.today())
     
     return {"message": "删除成功，资金曲线已重新计算"}
 
@@ -702,16 +705,19 @@ async def delete_trade(
     }
 )
 async def get_trade_dates(
+    strategy_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     try:
+        strategy = await _get_stock_strategy(db, current_user, strategy_id)
         # 获取所有交易记录，然后提取日期（转换为北京时间后提取日期）
         # 确保用户在某个日期开仓，日历就在对应日期做标记
         result = await db.execute(
             select(Trade.open_time)
             .where(
                 Trade.user_id == current_user.id,
+                Trade.strategy_id == strategy.id,
                 Trade.is_deleted == False  # 排除已删除的记录
             )
             .order_by(Trade.open_time.asc())
@@ -751,15 +757,18 @@ async def get_trade_dates(
     }
 )
 async def get_stock_codes(
+    strategy_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     try:
+        strategy = await _get_stock_strategy(db, current_user, strategy_id)
         # 获取所有交易记录，然后提取唯一的股票代码和名称
         result = await db.execute(
             select(Trade.stock_code, Trade.stock_name)
             .where(
                 Trade.user_id == current_user.id,
+                Trade.strategy_id == strategy.id,
                 Trade.is_deleted == False,
                 Trade.stock_code.isnot(None)
             )
@@ -810,15 +819,18 @@ async def get_stock_codes(
 )
 async def get_trades_by_stock_code(
     stock_code: str,
+    strategy_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     try:
+        strategy = await _get_stock_strategy(db, current_user, strategy_id)
         # 获取该股票的所有交易记录
         result = await db.execute(
             select(Trade)
             .where(
                 Trade.user_id == current_user.id,
+                Trade.strategy_id == strategy.id,
                 Trade.stock_code == stock_code,
                 Trade.is_deleted == False
             )

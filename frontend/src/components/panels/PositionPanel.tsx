@@ -38,6 +38,7 @@ export default function PositionPanel() {
     refreshUserPanel, 
     refreshTradeHistory, 
     _positionsRefreshKey, 
+    effectiveStrategyId,
     lastAddedTrade, 
     setLastAddedTrade,
     lastUpdatedTrade,
@@ -158,7 +159,13 @@ export default function PositionPanel() {
   const fetchPositions = async () => {
     setIsSyncing(true);
     try {
-      const response = await axios.get('/api/positions');
+      if (effectiveStrategyId == null) {
+        setPositions([]);
+        alertedPositionsRef.current.clear();
+        return;
+      }
+      const params = effectiveStrategyId != null ? { strategy_id: effectiveStrategyId } : undefined;
+      const response = await axios.get('/api/positions', { params });
       const newPositions = response.data;
       
       // 清除已删除持仓的提醒标记

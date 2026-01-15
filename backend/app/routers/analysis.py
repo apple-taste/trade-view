@@ -8,10 +8,11 @@ import time
 import json
 from datetime import datetime, date
 
-from app.database import get_db, Trade, CapitalHistory, ForexTrade, ForexAccount
+from app.database import get_db, Trade, CapitalHistory, StrategyCapitalHistory, ForexTrade, ForexAccount
 from app.middleware.auth import get_current_user
 from app.models import AnalysisResponse, AnalysisSummary, DetailedAnalysis
 from app.database import User
+from app.routers.user import _get_stock_strategy, _get_forex_strategy
 from app.services.ai_analyzer import ai_analyzer
 
 router = APIRouter()
@@ -78,6 +79,7 @@ logger = logging.getLogger(__name__)
 async def analyze_trades(
     use_ai: bool = False,  # 是否调用AI分析，默认False（只返回统计摘要）
     system_mode: str = "stock",  # 系统模式：stock 或 forex
+    strategy_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -87,11 +89,13 @@ async def analyze_trades(
     capital_history = []
 
     if system_mode == "forex":
+        strategy = await _get_forex_strategy(db, current_user, strategy_id)
         # 外汇模式：读取外汇交易与账户初始资金，按关闭日期构造资金曲线
         result = await db.execute(
             select(ForexTrade)
             .where(
                 ForexTrade.user_id == current_user.id,
+                ForexTrade.strategy_id == strategy.id,
                 ForexTrade.is_deleted == False
             )
             .order_by(ForexTrade.open_time.desc())
@@ -111,6 +115,7 @@ async def analyze_trades(
                 select(ForexTrade)
                 .where(
                     ForexTrade.user_id == current_user.id,
+                    ForexTrade.strategy_id == strategy.id,
                     ForexTrade.is_deleted == False,
                     ForexTrade.status == "closed",
                     ForexTrade.close_time.isnot(None),
@@ -128,18 +133,24 @@ async def analyze_trades(
             for d in sorted(points_by_date.keys()):
                 capital_history.append(type("CapitalPoint", (), {"date": d, "capital": points_by_date[d]}))
     else:
-        # A股模式：保持原逻辑
+        strategy = await _get_stock_strategy(db, current_user, strategy_id)
         result = await db.execute(
             select(Trade)
             .where(
                 Trade.user_id == current_user.id,
+                Trade.strategy_id == strategy.id,
                 Trade.is_deleted == False  # 排除已删除的记录
             )
             .order_by(Trade.open_time.desc())
         )
         trades = result.scalars().all()
         capital_result = await db.execute(
-            select(CapitalHistory).where(CapitalHistory.user_id == current_user.id).order_by(CapitalHistory.date.asc())
+            select(StrategyCapitalHistory)
+            .where(
+                StrategyCapitalHistory.user_id == current_user.id,
+                StrategyCapitalHistory.strategy_id == strategy.id,
+            )
+            .order_by(StrategyCapitalHistory.date.asc())
         )
         capital_history = capital_result.scalars().all()
     

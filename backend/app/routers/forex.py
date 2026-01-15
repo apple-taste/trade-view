@@ -7,6 +7,7 @@ import aiohttp
 
 from app.database import get_db, User, ForexAccount, ForexTrade
 from app.middleware.auth import get_current_user
+from app.routers.user import _get_forex_strategy
 from app.models import (
     ForexAccountResponse,
     ForexAccountUpdate,
@@ -126,7 +127,7 @@ async def _get_or_create_account(db: AsyncSession, user_id: int) -> ForexAccount
         raise e
 
 
-async def _recalculate_account(db: AsyncSession, user_id: int) -> ForexAccount:
+async def _recalculate_account(db: AsyncSession, user_id: int, strategy_id: int | None = None) -> ForexAccount:
     account = await _get_or_create_account(db, user_id)
     anchor_date = account.initial_date
 
@@ -137,6 +138,7 @@ async def _recalculate_account(db: AsyncSession, user_id: int) -> ForexAccount:
             ForexTrade.is_deleted == False,
             ForexTrade.status == "closed",
             ForexTrade.close_time.isnot(None),
+            ForexTrade.strategy_id == strategy_id if strategy_id is not None else True,
         )
         .order_by(ForexTrade.close_time.asc())
     )
@@ -162,6 +164,7 @@ async def _recalculate_account(db: AsyncSession, user_id: int) -> ForexAccount:
             ForexTrade.user_id == user_id,
             ForexTrade.is_deleted == False,
             ForexTrade.status == "open",
+            ForexTrade.strategy_id == strategy_id if strategy_id is not None else True,
         )
     )
     open_positions = open_result.scalars().all()
@@ -243,6 +246,7 @@ def _to_trade_response(trade: ForexTrade) -> ForexTradeResponse:
     return ForexTradeResponse(
         id=trade.id,
         user_id=trade.user_id,
+        strategy_id=trade.strategy_id,
         symbol=trade.symbol,
         side=trade.side,
         lots=trade.lots,
@@ -266,10 +270,12 @@ def _to_trade_response(trade: ForexTrade) -> ForexTradeResponse:
 
 @router.get("/account", response_model=ForexAccountResponse, summary="获取外汇账户信息")
 async def get_account(
+    strategy_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    account = await _recalculate_account(db, current_user.id)
+    strategy = await _get_forex_strategy(db, current_user, strategy_id)
+    account = await _recalculate_account(db, current_user.id, strategy.id)
     return _to_account_response(account)
 
 
@@ -314,6 +320,7 @@ async def get_quotes(
 @router.patch("/account", response_model=ForexAccountResponse, summary="更新外汇账户配置")
 async def update_account(
     payload: ForexAccountUpdate,
+    strategy_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -328,13 +335,14 @@ async def update_account(
         account.free_margin = payload.balance
         account.peak_equity = max(account.peak_equity or payload.balance, payload.balance)
     await db.commit()
-    account = await _recalculate_account(db, current_user.id)
+    account = await _recalculate_account(db, current_user.id, strategy_id)
     return _to_account_response(account)
 
 
 @router.post("/account/initial", response_model=ForexAccountResponse, summary="设置外汇初始资金与起始日期（不清空交易）")
 async def set_initial_capital(
     payload: ForexAccountInitialUpdate,
+    strategy_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -343,17 +351,20 @@ async def set_initial_capital(
     if payload.initial_date is not None:
         account.initial_date = payload.initial_date
     await db.commit()
-    await _recalculate_account(db, current_user.id)
+    await _recalculate_account(db, current_user.id, strategy_id)
     account = await _get_or_create_account(db, current_user.id)
     return _to_account_response(account)
 
 @router.post("/account/reset", response_model=ForexAccountResponse, summary="重置外汇账户与交易数据")
 async def reset_account(
     payload: ForexAccountReset,
+    strategy_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     account = await _get_or_create_account(db, current_user.id)
+    if strategy_id is not None:
+        await _get_forex_strategy(db, current_user, strategy_id)
 
     reset_date = payload.date or datetime.utcnow().date()
     account.currency = payload.currency or account.currency
@@ -368,10 +379,23 @@ async def reset_account(
     account.peak_equity = payload.balance
     account.max_drawdown = 0
 
-    await db.execute(
-        ForexTrade.__table__.delete().where(ForexTrade.user_id == current_user.id)
-    )
+    if strategy_id is not None:
+        now = datetime.utcnow()
+        await db.execute(
+            update(ForexTrade)
+            .where(
+                ForexTrade.user_id == current_user.id,
+                ForexTrade.strategy_id == strategy_id,
+                ForexTrade.is_deleted == False,
+            )
+            .values(is_deleted=True, updated_at=now)
+        )
+        await db.commit()
+        await db.refresh(account)
+        account = await _recalculate_account(db, current_user.id, strategy_id)
+        return _to_account_response(account)
 
+    await db.execute(ForexTrade.__table__.delete().where(ForexTrade.user_id == current_user.id))
     await db.commit()
     await db.refresh(account)
     return _to_account_response(account)
@@ -379,13 +403,16 @@ async def reset_account(
 
 @router.get("/positions", response_model=list[ForexTradeResponse], summary="获取外汇持仓")
 async def get_positions(
+    strategy_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    strategy = await _get_forex_strategy(db, current_user, strategy_id)
     result = await db.execute(
         select(ForexTrade)
         .where(
             ForexTrade.user_id == current_user.id,
+            ForexTrade.strategy_id == strategy.id,
             ForexTrade.status == "open",
             ForexTrade.is_deleted == False,
         )
@@ -399,19 +426,29 @@ async def get_positions(
 async def get_trades(
     page: int = 1,
     page_size: int = 50,
+    strategy_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    strategy = await _get_forex_strategy(db, current_user, strategy_id)
     count_result = await db.execute(
         select(func.count())
         .select_from(ForexTrade)
-        .where(ForexTrade.user_id == current_user.id, ForexTrade.is_deleted == False)
+        .where(
+            ForexTrade.user_id == current_user.id,
+            ForexTrade.strategy_id == strategy.id,
+            ForexTrade.is_deleted == False,
+        )
     )
     total = int(count_result.scalar() or 0)
     offset = (page - 1) * page_size
     result = await db.execute(
         select(ForexTrade)
-        .where(ForexTrade.user_id == current_user.id, ForexTrade.is_deleted == False)
+        .where(
+            ForexTrade.user_id == current_user.id,
+            ForexTrade.strategy_id == strategy.id,
+            ForexTrade.is_deleted == False,
+        )
         .order_by(ForexTrade.open_time.desc())
         .offset(offset)
         .limit(page_size)
@@ -428,13 +465,16 @@ async def get_trades(
 
 @router.get("/trades/dates", response_model=list[str], summary="获取外汇有交易记录的日期列表")
 async def get_trade_dates(
+    strategy_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    strategy = await _get_forex_strategy(db, current_user, strategy_id)
     result = await db.execute(
         select(ForexTrade.open_time)
         .where(
             ForexTrade.user_id == current_user.id,
+            ForexTrade.strategy_id == strategy.id,
             ForexTrade.is_deleted == False,
         )
         .order_by(ForexTrade.open_time.asc())
@@ -452,9 +492,12 @@ async def get_trade_dates(
 @router.post("/trades", response_model=ForexTradeResponse, status_code=status.HTTP_201_CREATED, summary="创建外汇开仓记录")
 async def create_trade(
     payload: ForexTradeCreate,
+    strategy_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    requested_strategy_id = payload.strategy_id if payload.strategy_id is not None else strategy_id
+    strategy = await _get_forex_strategy(db, current_user, requested_strategy_id)
     open_time = payload.open_time
     if open_time is None:
         open_time = datetime.utcnow()
@@ -463,6 +506,7 @@ async def create_trade(
 
     trade = ForexTrade(
         user_id=current_user.id,
+        strategy_id=strategy.id,
         symbol=payload.symbol.upper(),
         side=payload.side.upper(),
         lots=payload.lots,
@@ -480,25 +524,28 @@ async def create_trade(
 
     await db.commit()
     await db.refresh(trade)
-    await _recalculate_account(db, current_user.id)
+    await _recalculate_account(db, current_user.id, strategy.id)
     return _to_trade_response(trade)
 
 @router.delete("/trades/clear-all", summary="清空外汇交易记录（软删除）")
 async def clear_all_trades(
+    strategy_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    strategy = await _get_forex_strategy(db, current_user, strategy_id)
     now = datetime.utcnow()
     result = await db.execute(
         update(ForexTrade)
         .where(
             ForexTrade.user_id == current_user.id,
+            ForexTrade.strategy_id == strategy.id,
             ForexTrade.is_deleted == False,
         )
         .values(is_deleted=True, updated_at=now)
     )
     await db.commit()
-    await _recalculate_account(db, current_user.id)
+    await _recalculate_account(db, current_user.id, strategy.id)
     deleted_count = int(getattr(result, "rowcount", 0) or 0)
     return {"message": "清空成功", "deleted_count": deleted_count}
 
@@ -507,13 +554,16 @@ async def clear_all_trades(
 async def update_trade(
     trade_id: int,
     payload: ForexTradeUpdate,
+    strategy_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    strategy = await _get_forex_strategy(db, current_user, strategy_id)
     result = await db.execute(
         select(ForexTrade).where(
             ForexTrade.id == trade_id,
             ForexTrade.user_id == current_user.id,
+            ForexTrade.strategy_id == strategy.id,
             ForexTrade.is_deleted == False,
         )
     )
@@ -537,13 +587,16 @@ async def update_trade(
 async def close_trade(
     trade_id: int,
     payload: ForexTradeClose,
+    strategy_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    strategy = await _get_forex_strategy(db, current_user, strategy_id)
     result = await db.execute(
         select(ForexTrade).where(
             ForexTrade.id == trade_id,
             ForexTrade.user_id == current_user.id,
+            ForexTrade.strategy_id == strategy.id,
             ForexTrade.is_deleted == False,
         )
     )
@@ -572,20 +625,23 @@ async def close_trade(
 
     await db.commit()
     await db.refresh(trade)
-    await _recalculate_account(db, current_user.id)
+    await _recalculate_account(db, current_user.id, strategy.id)
     return _to_trade_response(trade)
 
 
 @router.delete("/trades/{trade_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除外汇交易记录（软删除）")
 async def delete_trade(
     trade_id: int,
+    strategy_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    strategy = await _get_forex_strategy(db, current_user, strategy_id)
     result = await db.execute(
         select(ForexTrade).where(
             ForexTrade.id == trade_id,
             ForexTrade.user_id == current_user.id,
+            ForexTrade.strategy_id == strategy.id,
             ForexTrade.is_deleted == False,
         )
     )
@@ -594,7 +650,7 @@ async def delete_trade(
         raise HTTPException(status_code=404, detail="Trade not found")
     trade.is_deleted = True
     await db.commit()
-    await _recalculate_account(db, current_user.id)
+    await _recalculate_account(db, current_user.id, strategy.id)
     return
 
 
@@ -602,9 +658,11 @@ async def delete_trade(
 async def get_capital_history(
     start_date: date | None = None,
     end_date: date | None = None,
+    strategy_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    strategy = await _get_forex_strategy(db, current_user, strategy_id)
     account = await _get_or_create_account(db, current_user.id)
     anchor_date = account.initial_date or datetime.utcnow().date()
     if start_date is not None:
@@ -614,6 +672,7 @@ async def get_capital_history(
         select(ForexTrade)
         .where(
             ForexTrade.user_id == current_user.id,
+            ForexTrade.strategy_id == strategy.id,
             ForexTrade.is_deleted == False,
             ForexTrade.status == "closed",
             ForexTrade.close_time.isnot(None),

@@ -1,5 +1,5 @@
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import declarative_base
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, Date, UniqueConstraint, Index
 from datetime import datetime
 import os
@@ -41,7 +41,12 @@ else:
     DB_TYPE = "SQLite"
 
 engine = create_async_engine(DATABASE_URL, echo=False)  # 关闭echo减少日志
-AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+try:
+    from sqlalchemy.ext.asyncio import async_sessionmaker  # type: ignore
+
+    AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+except Exception:
+    AsyncSessionLocal = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
 Base = declarative_base()
 
@@ -75,10 +80,12 @@ class Trade(Base):
     __tablename__ = "trades"
     __table_args__ = (
         Index('idx_user_open_time', 'user_id', 'is_deleted', 'open_time'),
+        Index('idx_user_strategy_open_time', 'user_id', 'strategy_id', 'is_deleted', 'open_time'),
     )
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, nullable=False, index=True)
+    strategy_id = Column(Integer, nullable=True, index=True)
     stock_code = Column(String, nullable=False)
     stock_name = Column(String)
     open_time = Column(DateTime, nullable=False, index=True)
@@ -105,6 +112,38 @@ class Trade(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+class Strategy(Base):
+    __tablename__ = "strategies"
+    __table_args__ = (
+        Index('idx_strategies_user_market', 'user_id', 'market'),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    uid = Column(String, nullable=False, unique=True, index=True)
+    market = Column(String, default="stock", index=True)
+    initial_capital = Column(Float, nullable=True)
+    initial_date = Column(Date, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class StrategyCapitalHistory(Base):
+    __tablename__ = "strategy_capital_history"
+    __table_args__ = (
+        UniqueConstraint('user_id', 'strategy_id', 'date', name='_user_strategy_date_uc'),
+        Index('idx_strategy_capital_user_strategy_date', 'user_id', 'strategy_id', 'date'),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    strategy_id = Column(Integer, nullable=False, index=True)
+    date = Column(Date, nullable=False, index=True)
+    capital = Column(Float, nullable=False)
+    available_funds = Column(Float, nullable=True)
+    position_value = Column(Float, nullable=True, default=0.0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 class ForexAccount(Base):
     __tablename__ = "forex_accounts"
     
@@ -128,10 +167,12 @@ class ForexTrade(Base):
     __tablename__ = "forex_trades"
     __table_args__ = (
         Index('idx_forex_user_open_time', 'user_id', 'is_deleted', 'open_time'),
+        Index('idx_forex_user_strategy_open_time', 'user_id', 'strategy_id', 'is_deleted', 'open_time'),
     )
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, nullable=False, index=True)
+    strategy_id = Column(Integer, nullable=True, index=True)
     symbol = Column(String, nullable=False)
     side = Column(String, nullable=False)  # BUY | SELL
     lots = Column(Float, nullable=False)
@@ -158,6 +199,16 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         if DB_TYPE == "SQLite":
+            result = await conn.exec_driver_sql("PRAGMA table_info(trades)")
+            cols = [row[1] for row in result.fetchall()]
+            if "strategy_id" not in cols:
+                await conn.exec_driver_sql("ALTER TABLE trades ADD COLUMN strategy_id INTEGER")
+
+            result = await conn.exec_driver_sql("PRAGMA table_info(forex_trades)")
+            cols = [row[1] for row in result.fetchall()]
+            if "strategy_id" not in cols:
+                await conn.exec_driver_sql("ALTER TABLE forex_trades ADD COLUMN strategy_id INTEGER")
+
             result = await conn.exec_driver_sql("PRAGMA table_info(forex_accounts)")
             cols = [row[1] for row in result.fetchall()]
             if "initial_balance" not in cols:
@@ -172,3 +223,6 @@ async def init_db():
                 await conn.exec_driver_sql(
                     "UPDATE forex_accounts SET initial_date = COALESCE(initial_date, DATE(created_at), DATE('now'))"
                 )
+        else:
+            await conn.exec_driver_sql("ALTER TABLE trades ADD COLUMN IF NOT EXISTS strategy_id INTEGER")
+            await conn.exec_driver_sql("ALTER TABLE forex_trades ADD COLUMN IF NOT EXISTS strategy_id INTEGER")

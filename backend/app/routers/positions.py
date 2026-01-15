@@ -9,7 +9,7 @@ from app.middleware.auth import get_current_user
 from app.models import PositionUpdate, TakeProfitRequest, StopLossRequest, TradeResponse
 from app.database import User
 from app.services.commission_calculator import default_calculator
-from app.routers.user import recalculate_capital_history
+from app.routers.user import recalculate_strategy_capital_history, _get_stock_strategy
 
 router = APIRouter()
 
@@ -81,13 +81,16 @@ async def update_capital_from_trade(db: AsyncSession, user_id: int, capital_chan
     }
 )
 async def get_positions(
+    strategy_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    strategy = await _get_stock_strategy(db, current_user, strategy_id)
     result = await db.execute(
         select(Trade)
         .where(
             Trade.user_id == current_user.id,
+            Trade.strategy_id == strategy.id,
             Trade.status == "open",
             Trade.is_deleted == False  # 排除已删除的记录
         )
@@ -273,16 +276,8 @@ async def take_profit(
     await db.commit()
     await db.refresh(position)
     
-    # 重新计算资金曲线，确保准确性
-    result = await db.execute(
-        select(CapitalHistory)
-        .where(CapitalHistory.user_id == current_user.id)
-        .order_by(CapitalHistory.date.asc())
-        .limit(1)
-    )
-    initial_capital_record = result.scalar_one_or_none()
-    if initial_capital_record:
-        await recalculate_capital_history(db, current_user.id, initial_capital_record.date)
+    strategy = await _get_stock_strategy(db, current_user, position.strategy_id)
+    await recalculate_strategy_capital_history(db, current_user.id, strategy.id, close_time.date())
     
     # 计算风险回报比
     pos_dict = position.__dict__.copy()
@@ -397,16 +392,8 @@ async def stop_loss(
     await db.commit()
     await db.refresh(position)
     
-    # 重新计算资金曲线，确保准确性
-    result = await db.execute(
-        select(CapitalHistory)
-        .where(CapitalHistory.user_id == current_user.id)
-        .order_by(CapitalHistory.date.asc())
-        .limit(1)
-    )
-    initial_capital_record = result.scalar_one_or_none()
-    if initial_capital_record:
-        await recalculate_capital_history(db, current_user.id, initial_capital_record.date)
+    strategy = await _get_stock_strategy(db, current_user, position.strategy_id)
+    await recalculate_strategy_capital_history(db, current_user.id, strategy.id, close_time.date())
     
     # 准备返回数据
     pos_dict = position.__dict__.copy()
