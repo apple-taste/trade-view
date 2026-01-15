@@ -1,7 +1,7 @@
 {
   "repo_url": "https://github.com/apple-taste/trade-view",
   "service_name": "trade-view",
-  "branch": "release/v1.1.2",
+  "branch": "main",
   "port": 8000,
   "streaming_log_timeout_seconds": 120,
   "env_vars": {
