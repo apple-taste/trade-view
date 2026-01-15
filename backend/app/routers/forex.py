@@ -5,7 +5,7 @@ from datetime import datetime, date, timezone, timedelta
 import time
 import aiohttp
 
-from app.database import get_db, User, ForexAccount, ForexTrade
+from app.database import get_db, User, ForexAccount, ForexTrade, Strategy
 from app.middleware.auth import get_current_user
 from app.routers.user import _get_forex_strategy
 from app.models import (
@@ -129,7 +129,16 @@ async def _get_or_create_account(db: AsyncSession, user_id: int) -> ForexAccount
 
 async def _recalculate_account(db: AsyncSession, user_id: int, strategy_id: int | None = None) -> ForexAccount:
     account = await _get_or_create_account(db, user_id)
+    
     anchor_date = account.initial_date
+    initial_balance = float(account.initial_balance or 0)
+
+    if strategy_id is not None:
+        strategy = await _get_forex_strategy(db, User(id=user_id), strategy_id)
+        if strategy:
+            anchor_date = strategy.initial_date or anchor_date
+            if strategy.initial_capital is not None:
+                initial_balance = float(strategy.initial_capital)
 
     result = await db.execute(
         select(ForexTrade)
@@ -144,7 +153,7 @@ async def _recalculate_account(db: AsyncSession, user_id: int, strategy_id: int 
     )
     closed = result.scalars().all()
 
-    running = float(account.initial_balance or 0)
+    running = initial_balance
     peak = running
     max_drawdown = 0.0
 
@@ -346,11 +355,19 @@ async def set_initial_capital(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    account = await _get_or_create_account(db, current_user.id)
-    account.initial_balance = payload.initial_balance
-    if payload.initial_date is not None:
-        account.initial_date = payload.initial_date
-    await db.commit()
+    if strategy_id is not None:
+        strategy = await _get_forex_strategy(db, current_user, strategy_id)
+        strategy.initial_capital = payload.initial_balance
+        if payload.initial_date is not None:
+            strategy.initial_date = payload.initial_date
+        await db.commit()
+    else:
+        account = await _get_or_create_account(db, current_user.id)
+        account.initial_balance = payload.initial_balance
+        if payload.initial_date is not None:
+            account.initial_date = payload.initial_date
+        await db.commit()
+
     await _recalculate_account(db, current_user.id, strategy_id)
     account = await _get_or_create_account(db, current_user.id)
     return _to_account_response(account)
