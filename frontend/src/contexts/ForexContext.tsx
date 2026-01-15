@@ -34,6 +34,8 @@ export interface ForexTrade {
   profit?: number | null;
   notes?: string | null;
   status: ForexTradeStatus;
+  theoreticalRiskRewardRatio?: number | null;
+  actualRiskRewardRatio?: number | null;
 }
 
 export interface ForexCapitalPoint {
@@ -149,6 +151,8 @@ const mapTrade = (data: any): ForexTrade => {
     profit: data.profit != null ? Number(data.profit) : null,
     notes: data.notes != null ? String(data.notes) : null,
     status: String(data.status) === 'closed' ? 'closed' : 'open',
+    theoreticalRiskRewardRatio: data.theoretical_risk_reward_ratio != null ? Number(data.theoretical_risk_reward_ratio) : null,
+    actualRiskRewardRatio: data.actual_risk_reward_ratio != null ? Number(data.actual_risk_reward_ratio) : null,
   };
 };
 

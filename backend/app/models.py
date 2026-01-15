@@ -253,6 +253,8 @@ class ForexTradeResponse(BaseModel):
     profit: Optional[float]
     notes: Optional[str]
     status: str
+    theoretical_risk_reward_ratio: Optional[float] = None
+    actual_risk_reward_ratio: Optional[float] = None
     created_at: datetime
     updated_at: datetime
 

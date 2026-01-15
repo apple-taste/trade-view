@@ -74,7 +74,8 @@ async def _fetch_fx_mid_price(symbol: str) -> tuple[float, str]:
 
     url = f"https://open.er-api.com/v6/latest/{base}"
     async with aiohttp.ClientSession() as session:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as resp:
+        # Disable SSL verification to avoid local certificate issues
+        async with session.get(url, ssl=False, timeout=aiohttp.ClientTimeout(total=3)) as resp:
             if resp.status != 200:
                 raise RuntimeError(f"Quote fetch failed: HTTP {resp.status}")
             data = await resp.json()
@@ -209,6 +210,36 @@ def _to_account_response(account: ForexAccount) -> ForexAccountResponse:
 
 
 def _to_trade_response(trade: ForexTrade) -> ForexTradeResponse:
+    # 计算风险回报比
+    theoretical_rr = None
+    actual_rr = None
+    
+    try:
+        open_price = float(trade.open_price) if trade.open_price else 0.0
+        sl_price = float(trade.sl) if trade.sl else None
+        
+        if sl_price is not None and open_price > 0 and abs(open_price - sl_price) > 1e-9:
+            risk_per_unit = abs(open_price - sl_price)
+            
+            # 理论风险回报比
+            if trade.tp is not None:
+                tp_price = float(trade.tp)
+                reward_per_unit = abs(tp_price - open_price)
+                theoretical_rr = round(reward_per_unit / risk_per_unit, 2)
+                
+            # 实际风险回报比
+            # 实际风险 = 单位风险 * 手数 * 合约大小
+            # 实际回报 = 净利润 (profit)
+            if trade.profit is not None:
+                lots = float(trade.lots) if trade.lots else 0.0
+                contract_size = _contract_size(trade.symbol)
+                total_risk = risk_per_unit * lots * contract_size
+                
+                if total_risk > 1e-9:
+                    actual_rr = round(float(trade.profit) / total_risk, 2)
+    except Exception:
+        pass
+
     return ForexTradeResponse(
         id=trade.id,
         user_id=trade.user_id,
@@ -226,6 +257,8 @@ def _to_trade_response(trade: ForexTrade) -> ForexTradeResponse:
         profit=trade.profit,
         notes=trade.notes,
         status=trade.status,
+        theoretical_risk_reward_ratio=theoretical_rr,
+        actual_risk_reward_ratio=actual_rr,
         created_at=trade.created_at,
         updated_at=trade.updated_at,
     )

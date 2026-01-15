@@ -390,6 +390,8 @@ export default function ForexTerminal() {
                 <th className="p-2">手数</th>
                 <th className="p-2 hidden md:table-cell">开仓价</th>
                 <th className="p-2 hidden md:table-cell">平仓价</th>
+                <th className="p-2 hidden md:table-cell">理论 R:R</th>
+                <th className="p-2 hidden md:table-cell">实际 R:R</th>
                 <th className="p-2 hidden md:table-cell">手续费</th>
                 <th className="p-2 hidden md:table-cell">隔夜</th>
                 <th className="p-2">盈亏</th>
@@ -405,6 +407,12 @@ export default function ForexTerminal() {
                   <td className="p-2">{trade.lots}</td>
                   <td className="p-2 hidden md:table-cell font-mono">{trade.openPrice.toFixed(5)}</td>
                   <td className="p-2 hidden md:table-cell font-mono">{trade.closePrice != null ? trade.closePrice.toFixed(5) : '-'}</td>
+                  <td className="p-2 hidden md:table-cell text-gray-400">
+                    {trade.theoreticalRiskRewardRatio != null ? `1:${trade.theoreticalRiskRewardRatio.toFixed(2)}` : '-'}
+                  </td>
+                  <td className={`p-2 hidden md:table-cell font-bold ${Number(trade.actualRiskRewardRatio ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {trade.actualRiskRewardRatio != null ? `1:${trade.actualRiskRewardRatio.toFixed(2)}` : '-'}
+                  </td>
                   <td className="p-2 hidden md:table-cell text-red-400/70">{trade.commission.toFixed(2)}</td>
                   <td className="p-2 hidden md:table-cell text-gray-400">{trade.swap.toFixed(2)}</td>
                   <td className={`p-2 font-bold ${Number(trade.profit ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
