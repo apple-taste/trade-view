@@ -975,6 +975,70 @@ async def create_strategy(
         created_at=strategy.created_at,
     )
 
+@router.delete("/strategies", summary="删除所有策略")
+async def delete_all_strategies(
+    market: str = "stock",
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    删除指定市场的所有策略（软删除关联数据，物理删除策略记录）
+    """
+    # 1. 查找该市场下的所有策略
+    result = await db.execute(
+        select(Strategy).where(
+            Strategy.user_id == current_user.id,
+            Strategy.market == market
+        )
+    )
+    strategies = result.scalars().all()
+    
+    deleted_count = 0
+    
+    for strategy in strategies:
+        # 删除关联数据逻辑与单个删除相同
+        if market == "stock":
+            trades_result = await db.execute(
+                select(Trade).where(
+                    Trade.user_id == current_user.id,
+                    Trade.strategy_id == strategy.id
+                )
+            )
+            trades = trades_result.scalars().all()
+            for t in trades:
+                t.is_deleted = True
+                t.deleted_at = datetime.now()
+            
+            # 删除策略资金历史
+            capital_result = await db.execute(
+                select(StrategyCapitalHistory).where(
+                    StrategyCapitalHistory.user_id == current_user.id,
+                    StrategyCapitalHistory.strategy_id == strategy.id
+                )
+            )
+            for h in capital_result.scalars().all():
+                await db.delete(h)
+                
+        elif market == "forex":
+            trades_result = await db.execute(
+                select(ForexTrade).where(
+                    ForexTrade.user_id == current_user.id,
+                    ForexTrade.strategy_id == strategy.id
+                )
+            )
+            trades = trades_result.scalars().all()
+            for t in trades:
+                t.is_deleted = True
+                t.deleted_at = datetime.now()
+                
+        # 删除策略本身
+        await db.delete(strategy)
+        deleted_count += 1
+        
+    await db.commit()
+    
+    return {"message": f"已删除 {deleted_count} 个策略", "deleted_count": deleted_count}
+
 @router.delete("/strategies/{strategy_id}", summary="删除策略")
 async def delete_strategy(
     strategy_id: int,

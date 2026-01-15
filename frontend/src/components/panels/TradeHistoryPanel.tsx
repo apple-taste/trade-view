@@ -122,9 +122,31 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
     effectiveStrategyId,
     setCurrentStrategyId,
     createStrategy,
-    deleteStrategy
+    deleteStrategy,
+    deleteAllStrategies
   } = useTrade();
   const { clearAlertsByStockCode } = useAlerts();
+
+  const handleClearAllStrategies = async () => {
+    if (strategies.length === 0) return;
+    const firstConfirm = await confirm(
+      '⚠️ 清空所有策略',
+      `确定要删除所有策略吗？\n\n此操作将：\n• 删除所有策略\n• 清空所有交易记录\n• 清空资金曲线\n\n此操作不可恢复！`
+    );
+    if (!firstConfirm) return;
+    const secondConfirm = await confirm(
+      '⚠️ 最终确认',
+      `请再次确认：您真的要清空所有策略吗？`
+    );
+    if (!secondConfirm) return;
+    try {
+      await deleteAllStrategies();
+      alert('✅ 已清空所有策略');
+    } catch (error: any) {
+      console.error('清空策略失败:', error);
+      alert('❌ 操作失败');
+    }
+  };
 
   const getCacheKey = useCallback(
     (dateStr: string) => `${effectiveStrategyId ?? 'default'}_${dateStr}`,
@@ -691,6 +713,15 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
             >
               删除
             </button>
+            {strategies.length > 0 && (
+              <button
+                onClick={handleClearAllStrategies}
+                className="jojo-button-danger text-xs px-2 py-1 ml-1 bg-red-800/50 border-red-800 hover:bg-red-800"
+                title="清空所有策略"
+              >
+                清空策略
+              </button>
+            )}
           </div>
           <div className="flex items-center space-x-1 bg-jojo-blue-light rounded p-0.5 border border-jojo-gold">
             <button

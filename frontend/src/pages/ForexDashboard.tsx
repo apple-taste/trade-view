@@ -139,7 +139,20 @@ const ForexDashboardContent = () => {
     return { data, keysByStrategyId };
   }, [capitalResponse, forexStrategies]);
 
-  const lineColors = ['#34d399', '#60a5fa', '#fbbf24', '#f472b6', '#a78bfa', '#22c55e', '#fb7185', '#38bdf8'];
+  const lineColors = [
+    '#FFD700', // Gold
+    '#10B981', // Emerald
+    '#3B82F6', // Blue
+    '#EC4899', // Pink
+    '#8B5CF6', // Violet
+    '#F97316', // Orange
+    '#EF4444', // Red
+    '#14B8A6', // Teal
+    '#F59E0B', // Amber
+    '#6366F1', // Indigo
+    '#A855F7', // Purple
+    '#06B6D4', // Cyan
+  ];
 
   return (
     <div className="h-full flex flex-col space-y-2 overflow-hidden text-gray-200 p-2 relative">

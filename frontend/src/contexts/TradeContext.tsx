@@ -36,6 +36,7 @@ interface TradeContextType {
   refreshStrategies: () => Promise<void>;
   createStrategy: (name: string) => Promise<Strategy | null>;
   deleteStrategy: (strategyId: number) => Promise<void>;
+  deleteAllStrategies: () => Promise<void>;
 
   forexStrategies: Strategy[];
   currentForexStrategyId: number | null;
@@ -44,6 +45,7 @@ interface TradeContextType {
   refreshForexStrategies: () => Promise<void>;
   createForexStrategy: (name: string) => Promise<Strategy | null>;
   deleteForexStrategy: (strategyId: number) => Promise<void>;
+  deleteAllForexStrategies: () => Promise<void>;
 }
 
 const TradeContext = createContext<TradeContextType | undefined>(undefined);
@@ -251,6 +253,22 @@ export function TradeProvider({ children }: { children: ReactNode }) {
     [forexStrategies, refreshAll, refreshForexStrategies]
   );
 
+  const deleteAllStrategies = useCallback(async () => {
+    await axios.delete('/api/user/strategies', { params: { market: 'stock' } });
+    await refreshStrategies();
+    setCurrentStrategyIdState(null);
+    localStorage.removeItem('currentStockStrategyId');
+    refreshAll();
+  }, [refreshAll, refreshStrategies]);
+
+  const deleteAllForexStrategies = useCallback(async () => {
+    await axios.delete('/api/user/strategies', { params: { market: 'forex' } });
+    await refreshForexStrategies();
+    setCurrentForexStrategyIdState(null);
+    localStorage.removeItem('currentForexStrategyId');
+    refreshAll();
+  }, [refreshAll, refreshForexStrategies]);
+
   useEffect(() => {
     refreshStrategies().catch(() => {});
   }, [refreshStrategies]);
@@ -287,6 +305,7 @@ export function TradeProvider({ children }: { children: ReactNode }) {
         refreshStrategies,
         createStrategy,
         deleteStrategy,
+        deleteAllStrategies,
 
         forexStrategies,
         currentForexStrategyId,
@@ -295,6 +314,7 @@ export function TradeProvider({ children }: { children: ReactNode }) {
         refreshForexStrategies,
         createForexStrategy,
         deleteForexStrategy,
+        deleteAllForexStrategies,
       }}
     >
       {children}

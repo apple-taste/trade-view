@@ -217,34 +217,126 @@ export function ForexProvider({ children }: { children: ReactNode }) {
 
   const createTrade = async (payload: ForexTradeCreatePayload) => {
     if (effectiveForexStrategyId == null) throw new Error('请先创建并选择策略');
-    await axios.post(
-      '/api/forex/trades',
-      { ...payload, strategy_id: effectiveForexStrategyId },
-      { params: { strategy_id: effectiveForexStrategyId } }
-    );
-    await refresh();
-    setRefreshKey((v) => v + 1);
+    
+    // Optimistic update
+    const tempId = -Date.now(); // Negative ID for temp
+    const tempTrade: ForexTrade = {
+      id: tempId,
+      symbol: payload.symbol,
+      side: payload.side,
+      lots: payload.lots,
+      openTime: payload.open_time || new Date().toISOString(),
+      openPrice: payload.open_price,
+      sl: payload.sl,
+      tp: payload.tp,
+      commission: payload.commission || 0,
+      swap: payload.swap || 0,
+      notes: payload.notes,
+      status: 'open',
+      theoreticalRiskRewardRatio: null,
+      actualRiskRewardRatio: null,
+    };
+    
+    setOpenTrades(prev => [tempTrade, ...prev]);
+
+    try {
+      await axios.post(
+        '/api/forex/trades',
+        { ...payload, strategy_id: effectiveForexStrategyId },
+        { params: { strategy_id: effectiveForexStrategyId } }
+      );
+      // Wait a bit to ensure backend consistency if needed, but usually not needed if we refresh
+      await refresh();
+      setRefreshKey((v) => v + 1);
+    } catch (error) {
+      // Revert on error
+      setOpenTrades(prev => prev.filter(t => t.id !== tempId));
+      throw error;
+    }
   };
 
   const closeTrade = async (tradeId: number, payload: ForexTradeClosePayload) => {
     if (effectiveForexStrategyId == null) throw new Error('请先创建并选择策略');
-    await axios.post(`/api/forex/trades/${tradeId}/close`, payload, { params: { strategy_id: effectiveForexStrategyId } });
-    await refresh();
-    setRefreshKey((v) => v + 1);
+    
+    // Optimistic update
+    const target = openTrades.find(t => t.id === tradeId);
+    if (target) {
+      setOpenTrades(prev => prev.filter(t => t.id !== tradeId));
+      const closedTrade: ForexTrade = {
+        ...target,
+        status: 'closed',
+        closePrice: payload.close_price,
+        closeTime: payload.close_time || new Date().toISOString(),
+        commission: payload.commission ?? target.commission,
+        swap: payload.swap ?? target.swap,
+        // Calculate rough profit for optimistic update if possible, otherwise leave as null or keep old
+        // Profit calculation is complex (depends on contract size etc), maybe just leave null or old
+      };
+      setClosedTrades(prev => [closedTrade, ...prev]);
+    }
+
+    try {
+      await axios.post(`/api/forex/trades/${tradeId}/close`, payload, { params: { strategy_id: effectiveForexStrategyId } });
+      await refresh();
+      setRefreshKey((v) => v + 1);
+    } catch (error) {
+      // Revert
+      if (target) {
+        setClosedTrades(prev => prev.filter(t => t.id !== tradeId));
+        setOpenTrades(prev => [target, ...prev]);
+      }
+      throw error;
+    }
   };
 
   const updateTrade = async (tradeId: number, payload: ForexTradeUpdatePayload) => {
     if (effectiveForexStrategyId == null) throw new Error('请先创建并选择策略');
-    await axios.patch(`/api/forex/trades/${tradeId}`, payload, { params: { strategy_id: effectiveForexStrategyId } });
-    await refresh();
-    setRefreshKey((v) => v + 1);
+    
+    // Optimistic update
+    const openTarget = openTrades.find(t => t.id === tradeId);
+    const closedTarget = closedTrades.find(t => t.id === tradeId);
+    
+    if (openTarget) {
+      setOpenTrades(prev => prev.map(t => t.id === tradeId ? { ...t, sl: payload.sl, tp: payload.tp, notes: payload.notes } : t));
+    } else if (closedTarget) {
+      setClosedTrades(prev => prev.map(t => t.id === tradeId ? { ...t, sl: payload.sl, tp: payload.tp, notes: payload.notes } : t));
+    }
+
+    try {
+      await axios.patch(`/api/forex/trades/${tradeId}`, payload, { params: { strategy_id: effectiveForexStrategyId } });
+      await refresh();
+      setRefreshKey((v) => v + 1);
+    } catch (error) {
+      // Revert
+      if (openTarget) {
+        setOpenTrades(prev => prev.map(t => t.id === tradeId ? openTarget : t));
+      } else if (closedTarget) {
+        setClosedTrades(prev => prev.map(t => t.id === tradeId ? closedTarget : t));
+      }
+      throw error;
+    }
   };
 
   const deleteTrade = async (tradeId: number) => {
     if (effectiveForexStrategyId == null) throw new Error('请先创建并选择策略');
-    await axios.delete(`/api/forex/trades/${tradeId}`, { params: { strategy_id: effectiveForexStrategyId } });
-    await refresh();
-    setRefreshKey((v) => v + 1);
+    
+    // Optimistic update
+    const openTarget = openTrades.find(t => t.id === tradeId);
+    const closedTarget = closedTrades.find(t => t.id === tradeId);
+    
+    if (openTarget) setOpenTrades(prev => prev.filter(t => t.id !== tradeId));
+    if (closedTarget) setClosedTrades(prev => prev.filter(t => t.id !== tradeId));
+
+    try {
+      await axios.delete(`/api/forex/trades/${tradeId}`, { params: { strategy_id: effectiveForexStrategyId } });
+      await refresh();
+      setRefreshKey((v) => v + 1);
+    } catch (error) {
+      // Revert
+      if (openTarget) setOpenTrades(prev => [openTarget, ...prev]);
+      if (closedTarget) setClosedTrades(prev => [closedTarget, ...prev]);
+      throw error;
+    }
   };
 
   const clearAllTrades = async () => {

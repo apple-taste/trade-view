@@ -51,7 +51,7 @@ export default function ForexTerminal() {
   const { account, openTrades, closedTrades, createTrade, closeTrade, updateTrade, deleteTrade, clearAllTrades, fetchQuotes, refresh } = useForex();
   const { t } = useLocale();
   const { confirm: jojoConfirm, prompt: jojoPrompt, Modal } = useJojoModal();
-  const { forexStrategies, effectiveForexStrategyId, setCurrentForexStrategyId, createForexStrategy, deleteForexStrategy } = useTrade();
+  const { forexStrategies, effectiveForexStrategyId, setCurrentForexStrategyId, createForexStrategy, deleteForexStrategy, deleteAllForexStrategies } = useTrade();
   const [activeTab, setActiveTab] = useState<ActiveTab>('OPEN');
   const [createOpen, setCreateOpen] = useState(false);
   const [closeTarget, setCloseTarget] = useState<ForexTrade | null>(null);
@@ -287,6 +287,29 @@ export default function ForexTerminal() {
     await deleteForexStrategy(current.id);
   };
 
+  const handleClearAllStrategies = async () => {
+    if (forexStrategies.length === 0) return;
+    
+    const first = await jojoConfirm(
+      '⚠️ 清空所有策略',
+      `确定要删除所有外汇策略吗？\n\n此操作将：\n• 删除所有外汇策略\n• 清空所有外汇交易记录\n• 资金曲线重置\n\n此操作不可恢复！`
+    );
+    if (!first) return;
+
+    const second = await jojoConfirm(
+      '⚠️ 最终确认',
+      `请再次确认：您真的要清空所有外汇策略吗？`
+    );
+    if (!second) return;
+
+    try {
+      await deleteAllForexStrategies();
+      alert('✅ 已清空所有外汇策略');
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || err?.message || '操作失败');
+    }
+  };
+
   return (
     <div className="h-full bg-gray-800 rounded-lg border border-gray-700 flex flex-col overflow-hidden">
       <div className="p-2 bg-gray-900 border-b border-gray-700 flex items-center justify-between">
@@ -324,6 +347,15 @@ export default function ForexTerminal() {
             >
               删除
             </button>
+            {forexStrategies.length > 0 && (
+              <button
+                onClick={handleClearAllStrategies}
+                className="px-2 py-1 text-xs font-bold rounded transition-colors bg-red-900/50 text-red-400 hover:bg-red-900 border border-red-800"
+                title="清空所有策略"
+              >
+                清空
+              </button>
+            )}
           </div>
           <button
             onClick={() => setActiveTab('OPEN')}
