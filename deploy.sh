@@ -54,7 +54,7 @@ with open("deploy-config.json", "r", encoding="utf-8") as f:
 
 env_vars = dict(config.get("env_vars") or {})
 
-for key in ["NODE_ENV", "LOG_LEVEL", "DATABASE_URL", "JWT_SECRET", "AI_BUILDER_TOKEN"]:
+for key in ["NODE_ENV", "LOG_LEVEL", "DATABASE_URL", "JWT_SECRET"]:
     val = os.getenv(key, "")
     if val:
         env_vars[key] = val
@@ -76,16 +76,22 @@ echo "$RESPONSE" | python3 -c "
 import json
 import sys
 try:
-    data = json.load(sys.stdin)
+    raw = sys.stdin.read()
+    data = json.loads(raw) if raw else {}
     print('✅ 部署请求已提交！')
     print(f'服务名: {data.get(\"service_name\", \"N/A\")}')
     print(f'状态: {data.get(\"status\", \"N/A\")}')
     print(f'消息: {data.get(\"message\", \"N/A\")}')
+    logs = data.get('streaming_logs') or data.get('streaming_log') or ''
+    if logs:
+        print('')
+        print('📄 部署日志（平台返回）：')
+        print(logs)
     print('')
     print('⏱️  请等待5-10分钟让部署完成')
     print('💡 可以使用 ./check-deployment.sh 查看部署状态')
 except Exception as e:
     print(f'❌ 错误: {e}')
     print('原始响应:')
-    print(sys.stdin.read())
+    print(raw)
 "

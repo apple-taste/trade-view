@@ -47,7 +47,6 @@ class AIAnalyzer:
             return self._basic_analysis(trades_data)
         
         logger.info(f"🔑 [ChatGPT-5] Token状态: ✅ 已配置")
-        logger.info(f"🔑 [ChatGPT-5] Token前缀: {self.api_key[:20]}...")
         logger.info(f"🌐 [ChatGPT-5] API端点: {self.chat_url}")
         logger.info(f"🤖 [ChatGPT-5] 模型: {self.model}")
         
@@ -116,7 +115,6 @@ class AIAnalyzer:
                 logger.info("📤 [ChatGPT-5] ========== 发送API请求 ==========")
                 logger.info("=" * 80)
                 logger.info(f"🌐 [ChatGPT-5] 请求URL: {self.chat_url}")
-                logger.info(f"🔑 [ChatGPT-5] Token: {self.api_key[:20]}...")
                 logger.info(f"📋 [ChatGPT-5] 请求参数:")
                 logger.info(f"   • Model: {payload['model']}")
                 logger.info(f"   • Temperature: {payload['temperature']}")

@@ -526,9 +526,7 @@ async def test_chatgpt_connection():
     token_configured = bool(api_key)
     
     logger.info(f"🔑 [ChatGPT测试] Token配置状态: {'✅ 已配置' if token_configured else '❌ 未配置'}")
-    if token_configured:
-        logger.info(f"🔑 [ChatGPT测试] Token前缀: {api_key[:20]}...")
-    else:
+    if not token_configured:
         logger.warning("⚠️ [ChatGPT测试] AI_BUILDER_TOKEN未设置")
         return {
             "status": "error",
