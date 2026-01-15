@@ -142,7 +142,8 @@ const ForexDashboardContent = () => {
   const lineColors = ['#34d399', '#60a5fa', '#fbbf24', '#f472b6', '#a78bfa', '#22c55e', '#fb7185', '#38bdf8'];
 
   return (
-    <div className="h-full flex flex-col space-y-2 overflow-hidden text-gray-200 p-2">
+    <div className="h-full flex flex-col space-y-2 overflow-hidden text-gray-200 p-2 relative">
+      <div className="absolute top-0 right-14 text-[10px] text-gray-600 opacity-50 z-50">v1.1.0</div>
       {/* Top Bar: Title & Settings */}
       <div className="flex justify-between items-center bg-gray-800 p-2 rounded-lg border border-gray-700 flex-none">
         <div className="flex items-center gap-4 min-w-0">
