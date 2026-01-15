@@ -55,7 +55,7 @@
   "env_vars": {
     "NODE_ENV": "production",
     "LOG_LEVEL": "info",
-    "JWT_SECRET": "Rik6AYOIG7iTO9ZSklubA2_mjFtyWizYbCrRheDSgiM",
+    "JWT_SECRET": "your_jwt_secret_here",
     "DB_DIR": "/data"
   }
 }
@@ -67,7 +67,7 @@
   "env_vars": {
     "NODE_ENV": "production",
     "LOG_LEVEL": "info",
-    "JWT_SECRET": "Rik6AYOIG7iTO9ZSklubA2_mjFtyWizYbCrRheDSgiM",
+    "JWT_SECRET": "your_jwt_secret_here",
     "DATABASE_URL": "postgresql://postgres:你的密码@db.xxxxx.supabase.co:5432/postgres"
   }
 }
@@ -88,7 +88,7 @@ git commit -m "Add PostgreSQL DATABASE_URL for data persistence"
 git push origin main
 
 # 2. 重新部署
-TOKEN="sk_cb7877e7_e4382f5e748e92cdd707b6f937e8cc8a5c2a"
+TOKEN="your_deploy_token_here"
 curl -X POST "https://space.ai-builders.com/backend/v1/deployments" \
   -H "Accept: application/json" \
   -H "Authorization: Bearer $TOKEN" \
@@ -141,7 +141,7 @@ postgresql://postgres:MySecurePassword123@db.abcdefghijklmnop.supabase.co:5432/p
   "env_vars": {
     "NODE_ENV": "production",
     "LOG_LEVEL": "info",
-    "JWT_SECRET": "Rik6AYOIG7iTO9ZSklubA2_mjFtyWizYbCrRheDSgiM",
+    "JWT_SECRET": "your_jwt_secret_here",
     "DATABASE_URL": "postgresql://postgres:MySecurePassword123@db.abcdefghijklmnop.supabase.co:5432/postgres"
   }
 }

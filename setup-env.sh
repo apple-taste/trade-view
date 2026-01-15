@@ -22,14 +22,14 @@ echo "📝 请输入以下配置信息："
 echo ""
 
 # GitHub Token
-read -p "GitHub Personal Access Token (ghp_...): " GITHUB_TOKEN
+read -p "GitHub Personal Access Token: " GITHUB_TOKEN
 if [ -z "$GITHUB_TOKEN" ]; then
     echo "⚠️  警告: GitHub Token为空，将使用默认值"
     GITHUB_TOKEN="your_github_token_here"
 fi
 
 # Deploy Token
-read -p "AI Builder Space Deploy Token (sk_...): " DEPLOY_TOKEN
+read -p "AI Builder Space Deploy Token: " DEPLOY_TOKEN
 if [ -z "$DEPLOY_TOKEN" ]; then
     echo "⚠️  警告: Deploy Token为空，将使用默认值"
     DEPLOY_TOKEN="your_deploy_token_here"
@@ -60,7 +60,7 @@ if [ -z "$JWT_SECRET" ]; then
 fi
 
 # AI Builder Token
-read -p "AI Builder Token (sk_...): " AI_BUILDER_TOKEN
+read -p "AI Builder Token: " AI_BUILDER_TOKEN
 if [ -z "$AI_BUILDER_TOKEN" ]; then
     AI_BUILDER_TOKEN="your_ai_builder_token_here"
 fi

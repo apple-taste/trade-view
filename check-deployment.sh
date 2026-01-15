@@ -10,7 +10,9 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
-export $(cat .env | grep -v '^#' | xargs)
+set -a
+source .env
+set +a
 
 # 检查必要的环境变量
 if [ -z "$DEPLOY_TOKEN" ]; then
@@ -115,7 +117,7 @@ echo ""
 
 # 4. 检查网站健康状态
 echo "🌐 网站健康检查："
-curl -s -I "https://trade-view.ai-builders.space/api/health" | head -5
+curl -s -i "https://${SERVICE_NAME}.ai-builders.space/api/health" | head -12
 echo ""
 
 echo "✅ 检查完成！"

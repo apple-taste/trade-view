@@ -60,7 +60,7 @@ if [ $? -eq 0 ]; then
     echo "2. 重新部署应用"
     echo ""
     echo "部署命令："
-    echo "TOKEN=\"sk_cb7877e7_e4382f5e748e92cdd707b6f937e8cc8a5c2a\""
+    echo "TOKEN=\"your_deploy_token_here\""
     echo "curl -X POST \"https://space.ai-builders.com/backend/v1/deployments\" \\"
     echo "  -H \"Accept: application/json\" \\"
     echo "  -H \"Authorization: Bearer \$TOKEN\" \\"

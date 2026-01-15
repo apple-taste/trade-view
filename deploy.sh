@@ -10,7 +10,9 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
-export $(cat .env | grep -v '^#' | xargs)
+set -a
+source .env
+set +a
 
 # 检查必要的环境变量
 if [ -z "$DEPLOY_TOKEN" ]; then
@@ -42,12 +44,32 @@ if [ ! -f deploy-config.json ]; then
     exit 1
 fi
 
+# 构建部署请求体（将敏感环境变量从 .env 注入，不写入 Git）
+PAYLOAD=$(python3 - << 'PY'
+import json
+import os
+
+with open("deploy-config.json", "r", encoding="utf-8") as f:
+    config = json.load(f)
+
+env_vars = dict(config.get("env_vars") or {})
+
+for key in ["NODE_ENV", "LOG_LEVEL", "DATABASE_URL", "JWT_SECRET", "AI_BUILDER_TOKEN"]:
+    val = os.getenv(key, "")
+    if val:
+        env_vars[key] = val
+
+config["env_vars"] = env_vars
+print(json.dumps(config, ensure_ascii=False))
+PY
+)
+
 # 提交部署请求
 RESPONSE=$(curl -s -X POST "${BASE_URL}/deployments" \
   -H "Accept: application/json" \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
-  -d @deploy-config.json)
+  -d "${PAYLOAD}")
 
 # 解析响应
 echo "$RESPONSE" | python3 -c "

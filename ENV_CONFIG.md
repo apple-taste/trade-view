@@ -30,11 +30,11 @@ nano .env  # 或使用其他编辑器
 # GitHub Personal Access Token (用于git push)
 # 获取方式：https://github.com/settings/tokens/new
 # 需要权限：repo (Full control of private repositories)
-GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+GITHUB_TOKEN=your_github_token_here
 
 # AI Builder Space Deployment Token (用于部署到Koyeb)
 # 获取方式：https://space.ai-builders.com/
-DEPLOY_TOKEN=sk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+DEPLOY_TOKEN=your_deploy_token_here
 
 # GitHub仓库信息
 GITHUB_REPO_OWNER=apple-taste
@@ -53,7 +53,7 @@ DATABASE_URL=postgresql://postgres:password@host:5432/postgres
 JWT_SECRET=your_jwt_secret_here
 
 # ChatGPT-5 API Token（通过AI Builder Space中转）
-AI_BUILDER_TOKEN=sk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+AI_BUILDER_TOKEN=your_ai_builder_token_here
 
 # 日志级别
 LOG_LEVEL=info

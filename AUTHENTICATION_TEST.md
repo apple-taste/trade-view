@@ -191,7 +191,7 @@ Payload包含：
 - **生产环境**: `/data/database.db`
 
 ### 环境变量
-- `JWT_SECRET`: `Rik6AYOIG7iTO9ZSklubA2_mjFtyWizYbCrRheDSgiM`
+- `JWT_SECRET`: `your_jwt_secret_here`
 - `DB_DIR`: `/data`
 
 ### 数据库持久化

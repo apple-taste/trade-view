@@ -24,7 +24,7 @@ cat > .env << 'EOF'
 # AI Builder Space 配置
 # ================================
 # ChatGPT-5 API Token（通过AI Builder Space中转）
-AI_BUILDER_TOKEN=sk_cb7877e7_e4382f5e748e92cdd707b6f937e8cc8a5c2a
+AI_BUILDER_TOKEN=your_ai_builder_token_here
 
 # ================================
 # 邮箱服务配置（可选）
@@ -40,7 +40,7 @@ EOF
 echo "✅ .env 文件已创建"
 echo ""
 echo "📝 配置内容："
-echo "   AI_BUILDER_TOKEN: sk_cb7877e7_..."
+echo "   AI_BUILDER_TOKEN: your_ai_builder_token_here"
 echo ""
 echo "🚀 下一步："
 echo "   1. 重启后端服务: python3 main.py"

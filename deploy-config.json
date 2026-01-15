@@ -5,9 +5,6 @@
   "port": 8000,
   "env_vars": {
     "NODE_ENV": "production",
-    "LOG_LEVEL": "info",
-    "JWT_SECRET": "Rik6AYOIG7iTO9ZSklubA2_mjFtyWizYbCrRheDSgiM",
-    "DATABASE_URL": "postgresql://postgres:ZQjy9909989@db.cfakngtqgzgtfswldnuz.supabase.co:5432/postgres",
-    "AI_BUILDER_TOKEN": "sk_cb7877e7_e4382f5e748e92cdd707b6f937e8cc8a5c2a"
+    "LOG_LEVEL": "info"
   }
 }

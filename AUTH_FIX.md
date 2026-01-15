@@ -38,7 +38,7 @@ VOLUME ["/data"]
 更新 `backend/env.template`:
 ```bash
 # JWT 认证密钥（重要！）
-JWT_SECRET=your-secret-key-change-in-production
+JWT_SECRET=your_jwt_secret_here
 ```
 
 ### 3. 部署环境变量配置
@@ -55,7 +55,7 @@ python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 
 示例输出：
 ```
-Rik6AYOIG7iTO9ZSklubA2_mjFtyWizYbCrRheDSgiM
+your_jwt_secret_here
 ```
 
 ## 注意事项

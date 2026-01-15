@@ -72,7 +72,7 @@ def main():
     
     # 保留其他必要的环境变量
     if 'JWT_SECRET' not in config['env_vars']:
-        config['env_vars']['JWT_SECRET'] = 'Rik6AYOIG7iTO9ZSklubA2_mjFtyWizYbCrRheDSgiM'
+        config['env_vars']['JWT_SECRET'] = 'your_jwt_secret_here'
     if 'NODE_ENV' not in config['env_vars']:
         config['env_vars']['NODE_ENV'] = 'production'
     if 'LOG_LEVEL' not in config['env_vars']:
@@ -94,58 +94,13 @@ def main():
         print()
         print("📋 下一步：")
         print()
-        print("1. 提交配置到GitHub：")
-        print("   git add deploy-config.json")
-        print("   git commit -m 'Add PostgreSQL DATABASE_URL'")
-        print("   git push origin main")
-        print()
-        print("2. 重新部署应用：")
-        print("   TOKEN=\"sk_cb7877e7_e4382f5e748e92cdd707b6f937e8cc8a5c2a\"")
-        print("   curl -X POST \"https://space.ai-builders.com/backend/v1/deployments\" \\")
-        print("     -H \"Accept: application/json\" \\")
-        print("     -H \"Authorization: Bearer $TOKEN\" \\")
-        print("     -H \"Content-Type: application/json\" \\")
-        print("     -d @deploy-config.json")
+        print("1. 确保本地 .env 已包含 DATABASE_URL 与 JWT_SECRET")
+        print("2. 触发部署：")
+        print("   ./deploy.sh")
         print()
         
-        # 询问是否自动提交和部署
-        auto_deploy = input("是否现在提交并部署？(y/n): ").strip().lower()
-        if auto_deploy == 'y':
-            print()
-            print("📤 提交配置到GitHub...")
-            os.system('git add deploy-config.json')
-            os.system('git commit -m "Add PostgreSQL DATABASE_URL configuration"')
-            os.system('git push origin main')
-            
-            print()
-            print("🚀 开始部署...")
-            token = "sk_cb7877e7_e4382f5e748e92cdd707b6f937e8cc8a5c2a"
-            os.system(f'''curl -s -X POST "https://space.ai-builders.com/backend/v1/deployments" \\
-              -H "Accept: application/json" \\
-              -H "Authorization: Bearer {token}" \\
-              -H "Content-Type: application/json" \\
-              -d @deploy-config.json | python3 -c "
-import json
-import sys
-try:
-    data = json.load(sys.stdin)
-    print(f'✅ 部署请求已提交！')
-    print(f'状态: {{data.get(\\\"status\\\", \\\"N/A\\\")}}')
-    print('')
-    print('⏱️  请等待5-10分钟让部署完成')
-    print('')
-    print('🔍 部署完成后验证：')
-    print('1. 访问 https://trade-view.ai-builders.space/')
-    print('2. 注册新账号')
-    print('3. 等待5分钟后重新部署')
-    print('4. 尝试登录，应该成功！')
-except:
-    print('部署请求已提交')
-"''')
-        else:
-            print()
-            print("✅ 配置已保存到 deploy-config.json")
-            print("请按照上面的步骤手动提交和部署")
+        print()
+        print("✅ 配置已保存到 deploy-config.json")
     
     except Exception as e:
         print(f"❌ 错误: {e}")

@@ -81,7 +81,7 @@ cp env.template .env
 
 ```env
 # AI Builder Space Token - ChatGPT-5 API
-AI_BUILDER_TOKEN=sk_cb7877e7_e4382f5e748e92cdd707b6f937e8cc8a5c2a
+AI_BUILDER_TOKEN=your_ai_builder_token_here
 
 # 邮箱服务配置（如果需要）
 SMTP_SERVER=smtp.gmail.com

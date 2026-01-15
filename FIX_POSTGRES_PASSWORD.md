@@ -22,13 +22,13 @@ Supabase项目的数据库密码与配置的密码不匹配。
 2. **查看或重置密码**
    - 点击 **Settings** → **Database**
    - 找到 **Database password** 部分
-   - 如果密码不是 `ZQjy9909989`，有两种选择：
-     - **选项A**：重置密码为 `ZQjy9909989`
+   - 如果密码不是 `[YOUR_DB_PASSWORD]`，有两种选择：
+     - **选项A**：重置密码为 `[YOUR_DB_PASSWORD]`
      - **选项B**：告诉我实际的密码，我会更新配置
 
 3. **重置密码步骤**（如果选择选项A）
    - 点击 "Reset database password"
-   - 输入新密码：`ZQjy9909989`
+   - 输入新密码：`[YOUR_DB_PASSWORD]`
    - 确认重置
    - 等待密码重置完成（通常几秒钟）
 
@@ -70,10 +70,10 @@ Supabase提供连接池，更适合生产环境：
 
 **连接字符串**：
 ```
-postgresql://postgres:ZQjy9909989@db.cfakngtqgzgtfswldnuz.supabase.co:5432/postgres
+postgresql://postgres:[YOUR_DB_PASSWORD]@db.xxxxx.supabase.co:5432/postgres
 ```
 
-**问题**：密码 `ZQjy9909989` 可能不正确
+**问题**：密码可能不正确
 
 ## 下一步
 
@@ -81,7 +81,7 @@ postgresql://postgres:ZQjy9909989@db.cfakngtqgzgtfswldnuz.supabase.co:5432/postg
 
 1. **告诉我正确的密码**，我会更新配置
 2. **告诉我连接池连接字符串**（端口6543），我会更新配置
-3. **重置Supabase密码为 `ZQjy9909989`**，然后告诉我，我会重新部署
+3. **重置Supabase密码为 `[YOUR_DB_PASSWORD]`**，然后告诉我，我会重新部署
 
 ## 验证
 
