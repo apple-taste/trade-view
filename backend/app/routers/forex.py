@@ -89,30 +89,40 @@ async def _fetch_fx_mid_price(symbol: str) -> tuple[float, str]:
 
 
 async def _get_or_create_account(db: AsyncSession, user_id: int) -> ForexAccount:
-    result = await db.execute(select(ForexAccount).where(ForexAccount.user_id == user_id))
-    account = result.scalar_one_or_none()
-    if account:
-        return account
+    try:
+        result = await db.execute(select(ForexAccount).where(ForexAccount.user_id == user_id))
+        account = result.scalar_one_or_none()
+        if account:
+            return account
 
-    now = datetime.utcnow()
-    new_account = ForexAccount(
-        user_id=user_id,
-        currency="USD",
-        leverage=100,
-        initial_balance=10000,
-        initial_date=now.date(),
-        balance=10000,
-        equity=10000,
-        margin=0,
-        free_margin=10000,
-        margin_level=0,
-        max_drawdown=0,
-        peak_equity=10000,
-    )
-    db.add(new_account)
-    await db.commit()
-    await db.refresh(new_account)
-    return new_account
+        now = datetime.utcnow()
+        new_account = ForexAccount(
+            user_id=user_id,
+            currency="USD",
+            leverage=100,
+            initial_balance=10000,
+            initial_date=now.date(),
+            balance=10000,
+            equity=10000,
+            margin=0,
+            free_margin=10000,
+            margin_level=0,
+            max_drawdown=0,
+            peak_equity=10000,
+        )
+        db.add(new_account)
+        await db.commit()
+        await db.refresh(new_account)
+        return new_account
+    except Exception as e:
+        # 如果出现唯一约束冲突，说明其他请求并发创建了账户
+        # 此时尝试重新查询
+        await db.rollback()
+        result = await db.execute(select(ForexAccount).where(ForexAccount.user_id == user_id))
+        account = result.scalar_one_or_none()
+        if account:
+            return account
+        raise e
 
 
 async def _recalculate_account(db: AsyncSession, user_id: int) -> ForexAccount:
