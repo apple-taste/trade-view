@@ -4,11 +4,10 @@ set -e
 cd "$(dirname "$0")"
 
 if [ $# -lt 1 ]; then
-  echo "用法: ./push_and_deploy.sh \"本次提交说明\""
-  exit 1
+  MSG="Auto deploy $(date '+%Y-%m-%d %H:%M:%S')"
+else
+  MSG="$1"
 fi
-
-MSG="$1"
 
 git status
 
@@ -27,4 +26,3 @@ if [ -x ./deploy.sh ]; then
 else
   echo "未找到可执行的 deploy.sh，已跳过部署步骤。"
 fi
-
