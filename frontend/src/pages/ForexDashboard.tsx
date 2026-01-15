@@ -143,7 +143,7 @@ const ForexDashboardContent = () => {
 
   return (
     <div className="h-full flex flex-col space-y-2 overflow-hidden text-gray-200 p-2 relative">
-      <div className="absolute top-0 right-14 text-[10px] text-gray-600 opacity-50 z-50">v1.1.2</div>
+      <div className="absolute top-0 right-14 text-[10px] text-gray-600 opacity-50 z-50">v1.1.3</div>
       {/* Top Bar: Title & Settings */}
       <div className="flex justify-between items-center bg-gray-800 p-2 rounded-lg border border-gray-700 flex-none">
         <div className="flex items-center gap-4 min-w-0">

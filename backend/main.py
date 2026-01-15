@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("=" * 80)
-    logger.info("🚀 启动 A股交易管理系统后端服务 v1.1.2")
+    logger.info("🚀 启动 A股交易管理系统后端服务 v1.1.3")
     logger.info("=" * 80)
     
     # 检查环境变量加载
@@ -309,8 +309,7 @@ async def root():
     return {"message": "A股交易管理系统 API", "docs": "/docs"}
 
 # 静态文件服务（用于前端）- 必须在其他路由之后
-@app.get(
-    "/api/health",
+@app.api_route("/api/health", methods=["GET", "HEAD"],
     summary="健康检查（含环境变量状态）",
     description="""
     健康检查端点，用于监控服务运行状态。
