@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("=" * 80)
-    logger.info("🚀 启动 A股交易管理系统后端服务 v1.1.1")
+    logger.info("🚀 启动 A股交易管理系统后端服务 v1.1.2")
     logger.info("=" * 80)
     
     # 检查环境变量加载
