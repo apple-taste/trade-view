@@ -1,11 +1,13 @@
 import { useMemo, useState, type ChangeEvent } from 'react';
 import { useForex } from '../../contexts/ForexContext';
 import { useLocale } from '../../contexts/LocaleContext';
+import { useTrade } from '../../contexts/TradeContext';
 import { Settings, X, Save } from 'lucide-react';
 
 export default function ForexSettingsModal({ onClose }: { onClose: () => void }) {
   const { account, updateAccount, setInitialCapital, refresh } = useForex();
   const { t } = useLocale();
+  const { effectiveForexStrategyId } = useTrade();
   const [currency, setCurrency] = useState(account.currency);
   const [leverage, setLeverage] = useState(String(account.leverage || 100));
   const [initialBalance, setInitialBalance] = useState(String(account.initialBalance || account.balance));
@@ -36,6 +38,10 @@ export default function ForexSettingsModal({ onClose }: { onClose: () => void })
 
   const handleSetInitial = async () => {
     try {
+      if (effectiveForexStrategyId == null) {
+        alert('请先创建并选择一个策略，然后再设置资金锚点！');
+        return;
+      }
       const balance = Number(initialBalance);
       if (!Number.isFinite(balance) || balance < 0) throw new Error('Invalid balance');
       await setInitialCapital({
