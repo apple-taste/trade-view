@@ -19,21 +19,21 @@ export default function JojolandMascot({ inline = false }: JojolandMascotProps) 
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
   const containerClass = inline
-    ? 'flex items-center justify-between px-3 py-1 rounded border border-jojo-gold bg-jojo-blue-light'
+    ? 'flex items-center gap-2 px-3 py-1 rounded border border-jojo-gold bg-jojo-blue-light min-w-0'
     : 'jojo-card p-2';
 
   const headerClass = inline
-    ? 'flex items-center justify-between mr-3'
+    ? 'flex items-center gap-2 flex-shrink-0'
     : 'flex items-center justify-between mb-2';
 
   return (
     <div className={containerClass}>
       <div className={headerClass}>
         <h3 className="jojo-title text-xs md:text-sm whitespace-nowrap">JOJO LAND 萌宠</h3>
-        <span className="text-[10px] md:text-xs text-jojo-gold/70 whitespace-nowrap">Stand Power</span>
+        <span className="hidden sm:inline text-[10px] md:text-xs text-jojo-gold/70 whitespace-nowrap">Stand Power</span>
       </div>
       
-      <div className="flex justify-between items-center gap-1 overflow-x-auto custom-scrollbar pb-1 flex-1">
+      <div className="flex justify-between items-center gap-1 overflow-x-auto custom-scrollbar pb-1 flex-1 min-w-0">
         {mascots.map((mascot) => {
           const Icon = mascot.icon;
           const isSelected = selectedId === mascot.id;

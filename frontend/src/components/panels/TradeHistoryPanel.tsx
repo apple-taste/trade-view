@@ -686,14 +686,14 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
 
   return (
     <div className="jojo-card p-3 h-full flex flex-col min-h-0">
-      <div className="flex items-center mb-2 gap-2">
-        <div className="flex items-center space-x-2 flex-shrink-0">
+      <div className="flex items-center mb-2 gap-2 min-w-0">
+        <div className="flex items-center space-x-2 min-w-0">
           <h2 className="jojo-title text-lg whitespace-nowrap">开仓记录历史</h2>
-          <div className="flex items-center space-x-1">
+          <div className="flex items-center gap-1 min-w-0 flex-wrap">
             <select
               value={effectiveStrategyId ?? ''}
               onChange={(e) => setCurrentStrategyId(e.target.value ? Number(e.target.value) : null)}
-              className="jojo-input text-xs py-1"
+              className="jojo-input text-xs py-1 w-[140px] md:w-[180px]"
             >
               <option value="">请选择策略</option>
               {strategies.map((s) => (
@@ -748,7 +748,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
             </button>
           </div>
         </div>
-        <div className="flex-1 flex justify-center px-2">
+        <div className="flex-1 flex justify-center px-2 min-w-0">
           <JojolandMascot inline />
         </div>
         <div className="flex items-center space-x-1 flex-shrink-0">
