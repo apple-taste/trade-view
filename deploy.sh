@@ -61,7 +61,6 @@ for key in [
     "LOG_LEVEL",
     "DATABASE_URL",
     "JWT_SECRET",
-    "AI_BUILDER_TOKEN",
     "ADMIN_USERNAME",
     "ADMIN_PASSWORD",
     "ADMIN_PASSWORD_HASH",
