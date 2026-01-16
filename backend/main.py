@@ -309,64 +309,21 @@ async def root():
         return FileResponse(str(index_file))
     return {"message": "A股交易管理系统 API", "docs": "/docs"}
 
-# 静态文件服务（用于前端）- 必须在其他路由之后
-@app.api_route("/api/health", methods=["GET", "HEAD"],
+@app.api_route(
+    "/api/health",
+    methods=["GET", "HEAD"],
     summary="健康检查（含环境变量状态）",
-    description="""
-    健康检查端点，用于监控服务运行状态。
-    
-    **特点**:
-    - 不需要认证即可访问
-    - 返回服务状态和基本信息
-    - 包含价格监控服务状态
-    - 包含环境变量配置状态
-    - 支持GET和HEAD方法（HEAD用于Koyeb健康检查）
-    
-    **返回信息**:
-    - `status`: 服务状态 ("healthy" 或 "unhealthy")
-    - `service`: 服务名称
-    - `version`: API版本号
-    - `price_monitor`: 价格监控服务状态
-    - `alert_monitor`: 闹铃监控服务状态
-    - `environment`: 环境变量配置状态
-    - `timestamp`: 检查时间戳
-    """,
     tags=["系统"],
-    responses={
-        200: {
-            "description": "服务健康",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "status": "healthy",
-                        "service": "A股交易管理系统 API",
-                        "version": "1.0.0",
-                        "price_monitor": "running",
-                        "alert_monitor": "running",
-                        "environment": {
-                            "ai_builder_token": "configured",
-                            "smtp_server": "not_configured"
-                        },
-                        "timestamp": "2026-01-12T11:32:04.231163"
-                    }
-                }
-            }
-        }
-    }
 )
-@app.head("/api/health")
-async def health_check_head():
-    """健康检查HEAD方法（用于Koyeb健康检查）"""
-    # HEAD请求只返回状态码，不返回body
-    return Response(status_code=200)
-
-async def health_check():
+async def health_check(request: Request):
     """
     健康检查端点（增强版）
     
     用于监控服务状态，返回服务运行状态、环境变量配置和基本信息。
     不需要认证即可访问。
     """
+    if request.method == "HEAD":
+        return Response(status_code=200)
     try:
         # 检查价格监控服务状态
         price_monitor_status = "running" if price_monitor.running else "stopped"

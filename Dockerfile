@@ -1,5 +1,5 @@
 # 多阶段构建：构建前端
-FROM node:20-alpine AS frontend-builder
+FROM node:20-bookworm-slim AS frontend-builder
 
 WORKDIR /app/frontend
 
@@ -7,7 +7,7 @@ WORKDIR /app/frontend
 COPY frontend/package.json ./
 # 如果package-lock.json存在则复制，否则使用npm install
 COPY frontend/package-lock.json* ./
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+RUN if [ -f package-lock.json ]; then npm ci || npm install; else npm install; fi
 
 # 复制前端源代码并构建
 COPY frontend/ .

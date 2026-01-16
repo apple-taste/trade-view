@@ -48,11 +48,13 @@ fi
 PAYLOAD=$(python3 - << 'PY'
 import json
 import os
+import time
 
 with open("deploy-config.json", "r", encoding="utf-8") as f:
     config = json.load(f)
 
 env_vars = dict(config.get("env_vars") or {})
+env_vars["FORCE_REBUILD"] = f"{int(time.time())}"
 
 for key in [
     "NODE_ENV",
