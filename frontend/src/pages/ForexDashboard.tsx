@@ -85,7 +85,7 @@ const ForexDashboardContent = () => {
     };
 
     fetchCapitalHistories();
-  }, [endDate, forexStrategies.length, startDate]);
+  }, [endDate, forexStrategies.length, refreshKey, startDate]);
 
   const singleStrategySeries = useMemo(() => {
     if (!capitalResponse) return [];

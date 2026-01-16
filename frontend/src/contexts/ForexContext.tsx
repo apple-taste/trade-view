@@ -113,6 +113,7 @@ interface ForexContextType {
   clearAllTrades: () => Promise<{ deleted_count: number }>;
   updateAccount: (payload: ForexAccountUpdatePayload) => Promise<void>;
   setInitialCapital: (payload: ForexInitialCapitalPayload) => Promise<void>;
+  saveSettings: (payload: ForexAccountUpdatePayload & ForexInitialCapitalPayload) => Promise<void>;
   resetAccount: (payload: ForexAccountResetPayload) => Promise<void>;
   fetchQuotes: (symbols: string[]) => Promise<ForexQuote[]>;
   refresh: () => Promise<void>;
@@ -363,6 +364,25 @@ export function ForexProvider({ children }: { children: ReactNode }) {
     setRefreshKey((v) => v + 1);
   };
 
+  const saveSettings = async (payload: ForexAccountUpdatePayload & ForexInitialCapitalPayload) => {
+    if (effectiveForexStrategyId == null) throw new Error('请先创建并选择策略');
+    const { currency, leverage, initial_balance, initial_date } = payload;
+    await Promise.all([
+      axios.patch(
+        '/api/forex/account',
+        { currency, leverage },
+        { params: { strategy_id: effectiveForexStrategyId } }
+      ),
+      axios.post(
+        '/api/forex/account/initial',
+        { initial_balance, initial_date },
+        { params: { strategy_id: effectiveForexStrategyId } }
+      ),
+    ]);
+    await refresh();
+    setRefreshKey((v) => v + 1);
+  };
+
   const resetAccount = async (payload: ForexAccountResetPayload) => {
     await axios.post('/api/forex/account/reset', payload, {
       params: effectiveForexStrategyId != null ? { strategy_id: effectiveForexStrategyId } : undefined,
@@ -403,6 +423,7 @@ export function ForexProvider({ children }: { children: ReactNode }) {
       clearAllTrades,
       updateAccount,
       setInitialCapital,
+      saveSettings,
       resetAccount,
       fetchQuotes,
       refresh,
