@@ -57,6 +57,12 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=False)
+    is_admin = Column(Boolean, default=False)
+    last_login_at = Column(DateTime, nullable=True)
+    is_paid = Column(Boolean, default=False)
+    paid_until = Column(Date, nullable=True)
+    plan = Column(String, default="free")
+    total_paid = Column(Float, default=0.0)
     # 初始入金锚点（用于"清空交易→恢复初始资金"以及资金曲线重算起点）
     initial_capital = Column(Float, nullable=True)
     initial_capital_date = Column(Date, nullable=True)
@@ -199,6 +205,21 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         if DB_TYPE == "SQLite":
+            result = await conn.exec_driver_sql("PRAGMA table_info(users)")
+            cols = [row[1] for row in result.fetchall()]
+            if "is_admin" not in cols:
+                await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT 0")
+            if "last_login_at" not in cols:
+                await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN last_login_at DATETIME")
+            if "is_paid" not in cols:
+                await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN is_paid BOOLEAN DEFAULT 0")
+            if "paid_until" not in cols:
+                await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN paid_until DATE")
+            if "plan" not in cols:
+                await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN plan VARCHAR DEFAULT 'free'")
+            if "total_paid" not in cols:
+                await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN total_paid FLOAT DEFAULT 0")
+
             result = await conn.exec_driver_sql("PRAGMA table_info(trades)")
             cols = [row[1] for row in result.fetchall()]
             if "strategy_id" not in cols:
@@ -226,3 +247,9 @@ async def init_db():
         else:
             await conn.exec_driver_sql("ALTER TABLE trades ADD COLUMN IF NOT EXISTS strategy_id INTEGER")
             await conn.exec_driver_sql("ALTER TABLE forex_trades ADD COLUMN IF NOT EXISTS strategy_id INTEGER")
+            await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE")
+            await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP")
+            await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_paid BOOLEAN DEFAULT FALSE")
+            await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_until DATE")
+            await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS plan VARCHAR DEFAULT 'free'")
+            await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS total_paid DOUBLE PRECISION DEFAULT 0")

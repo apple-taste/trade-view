@@ -42,6 +42,45 @@ class TokenResponse(BaseModel):
     token: str
     user: UserResponse
 
+class AdminLogin(BaseModel):
+    username: str
+    password: str
+
+class AdminTokenResponse(BaseModel):
+    token: str
+    admin_username: str
+
+class AdminStatsResponse(BaseModel):
+    total_users: int
+    new_users_7d: int
+    active_users_7d: int
+    paid_users: int
+    total_revenue: float
+
+class AdminUserListItem(BaseModel):
+    id: int
+    username: str
+    email: str
+    created_at: Optional[datetime] = None
+    last_login_at: Optional[datetime] = None
+    is_paid: bool = False
+    paid_until: Optional[date] = None
+    plan: Optional[str] = None
+    total_paid: float = 0.0
+
+class PaginatedAdminUserResponse(BaseModel):
+    items: List[AdminUserListItem]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+class AdminUserUpdate(BaseModel):
+    is_paid: Optional[bool] = None
+    paid_until: Optional[date] = None
+    plan: Optional[str] = None
+    total_paid: Optional[float] = None
+
 # 资金相关
 class CapitalUpdate(BaseModel):
     capital: float

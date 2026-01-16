@@ -65,6 +65,12 @@ if [ -z "$AI_BUILDER_TOKEN" ]; then
     AI_BUILDER_TOKEN="your_ai_builder_token_here"
 fi
 
+# 管理员登录（用于 /admin/login）
+read -p "管理员用户名 (默认: admin): " ADMIN_USERNAME
+ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+read -s -p "管理员密码 (留空则不启用管理员登录): " ADMIN_PASSWORD
+echo ""
+
 # 创建.env文件
 cat > .env << EOF
 # ============================================
@@ -96,6 +102,10 @@ JWT_SECRET=${JWT_SECRET}
 
 # ChatGPT-5 API Token（通过AI Builder Space中转）
 AI_BUILDER_TOKEN=${AI_BUILDER_TOKEN}
+
+# 管理员登录（用于 /api/admin/login）
+ADMIN_USERNAME=${ADMIN_USERNAME}
+ADMIN_PASSWORD=${ADMIN_PASSWORD}
 
 # 日志级别
 LOG_LEVEL=info

@@ -19,9 +19,9 @@ pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 SECRET_KEY = os.getenv("JWT_SECRET", "your-secret-key-change-in-production")
 ALGORITHM = "HS256"
 
-def create_access_token(user_id: int) -> str:
+def create_access_token(user_id: int, is_admin: bool = False) -> str:
     expire = datetime.utcnow() + timedelta(days=7)
-    to_encode = {"userId": user_id, "exp": expire}
+    to_encode = {"userId": user_id, "isAdmin": is_admin, "exp": expire}
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
@@ -104,7 +104,7 @@ async def register(user_data: UserRegister, db: AsyncSession = Depends(get_db)):
     await db.commit()
     
     # 生成token
-    token = create_access_token(new_user.id)
+    token = create_access_token(new_user.id, bool(getattr(new_user, "is_admin", False)))
     
     logger.info(f"✅ [注册成功] 用户ID: {new_user.id}, 用户名: {new_user.username}")
     
@@ -185,8 +185,11 @@ async def login(user_data: UserLogin, db: AsyncSession = Depends(get_db)):
             detail="用户名或密码错误"
         )
     
+    user.last_login_at = datetime.utcnow()
+    await db.commit()
+
     # 生成token
-    token = create_access_token(user.id)
+    token = create_access_token(user.id, bool(getattr(user, "is_admin", False)))
     
     logger.info(f"✅ [登录成功] 用户ID: {user.id}, 用户名: {user.username}")
     

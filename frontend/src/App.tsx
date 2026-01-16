@@ -4,8 +4,11 @@ import { TradeProvider } from './contexts/TradeContext';
 import { AlertProvider } from './contexts/AlertContext';
 import { LocaleProvider } from './contexts/LocaleContext';
 import Login from './pages/Login';
+import AdminLogin from './pages/AdminLogin';
+import AdminDashboard from './pages/AdminDashboard';
 import Dashboard from './pages/Dashboard';
 import PrivateRoute from './components/PrivateRoute';
+import AdminPrivateRoute from './components/AdminPrivateRoute';
 
 function App() {
   return (
@@ -21,6 +24,15 @@ function App() {
             >
               <Routes>
                 <Route path="/login" element={<Login />} />
+                <Route path="/admin/login" element={<AdminLogin />} />
+                <Route
+                  path="/admin/*"
+                  element={
+                    <AdminPrivateRoute>
+                      <AdminDashboard />
+                    </AdminPrivateRoute>
+                  }
+                />
                 <Route
                   path="/*"
                   element={

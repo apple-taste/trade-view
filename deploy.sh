@@ -54,7 +54,16 @@ with open("deploy-config.json", "r", encoding="utf-8") as f:
 
 env_vars = dict(config.get("env_vars") or {})
 
-for key in ["NODE_ENV", "LOG_LEVEL", "DATABASE_URL", "JWT_SECRET"]:
+for key in [
+    "NODE_ENV",
+    "LOG_LEVEL",
+    "DATABASE_URL",
+    "JWT_SECRET",
+    "AI_BUILDER_TOKEN",
+    "ADMIN_USERNAME",
+    "ADMIN_PASSWORD",
+    "ADMIN_PASSWORD_HASH",
+]:
     val = os.getenv(key, "")
     if val:
         env_vars[key] = val
