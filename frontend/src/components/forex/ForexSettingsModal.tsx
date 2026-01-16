@@ -7,11 +7,12 @@ import { Settings, X, Save } from 'lucide-react';
 export default function ForexSettingsModal({ onClose }: { onClose: () => void }) {
   const { account, updateAccount, setInitialCapital, refresh } = useForex();
   const { t } = useLocale();
-  const { effectiveForexStrategyId } = useTrade();
+  const { effectiveForexStrategyId, refreshUserPanel } = useTrade();
   const [currency, setCurrency] = useState(account.currency);
   const [leverage, setLeverage] = useState(String(account.leverage || 100));
   const [initialBalance, setInitialBalance] = useState(String(account.initialBalance || account.balance));
   const [initialDate, setInitialDate] = useState<string>(account.initialDate ? String(account.initialDate) : '');
+  const [isSaving, setIsSaving] = useState(false);
 
   const leverageOptions = useMemo(() => ['1', '10', '50', '100', '200', '400', '500', '1000'], []);
   
@@ -25,33 +26,41 @@ export default function ForexSettingsModal({ onClose }: { onClose: () => void })
 
   const handleSave = async () => {
     try {
-      await updateAccount({
-        currency,
-        leverage: Number(leverage),
-      });
-      await refresh();
-      onClose();
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || err?.message || '操作失败');
-    }
-  };
-
-  const handleSetInitial = async () => {
-    try {
-      if (effectiveForexStrategyId == null) {
-        alert('请先创建并选择一个策略，然后再设置资金锚点！');
-        return;
-      }
+      setIsSaving(true);
+      // Validate initial capital if strategy is selected
       const balance = Number(initialBalance);
-      if (!Number.isFinite(balance) || balance < 0) throw new Error('Invalid balance');
-      await setInitialCapital({
-        initial_balance: balance,
-        initial_date: initialDate || undefined,
-      });
-      await refresh();
+      if (effectiveForexStrategyId != null && (!Number.isFinite(balance) || balance < 0)) {
+        throw new Error('Invalid balance');
+      }
+
+      const tasks: Promise<any>[] = [
+        updateAccount({
+          currency,
+          leverage: Number(leverage),
+        })
+      ];
+
+      // Only update initial capital if strategy is selected
+      if (effectiveForexStrategyId != null) {
+        tasks.push(setInitialCapital({
+          initial_balance: balance,
+          initial_date: initialDate || undefined,
+        }));
+      }
+
+      await Promise.all(tasks);
+      
+      // Parallel refresh for speed
+      await Promise.all([
+        refresh(),
+        refreshUserPanel()
+      ]);
+      
       onClose();
     } catch (err: any) {
       alert(err?.response?.data?.detail || err?.message || '操作失败');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -126,14 +135,6 @@ export default function ForexSettingsModal({ onClose }: { onClose: () => void })
                 />
               </div>
             </div>
-            <div className="flex justify-end">
-              <button
-                onClick={handleSetInitial}
-                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded transition-colors"
-              >
-                {t('forex.setInitialCapital')}
-              </button>
-            </div>
           </div>
 
         </div>
@@ -143,15 +144,17 @@ export default function ForexSettingsModal({ onClose }: { onClose: () => void })
             <button
               onClick={onClose}
               className="px-4 py-2 text-gray-400 hover:text-white transition-colors"
+              disabled={isSaving}
             >
               {t('forex.cancel')}
             </button>
             <button
               onClick={handleSave}
-              className="flex items-center gap-2 px-6 py-2 bg-jojo-gold text-gray-900 font-bold rounded hover:bg-yellow-400 transition-colors shadow-lg shadow-yellow-500/20"
+              disabled={isSaving}
+              className={`flex items-center gap-2 px-6 py-2 bg-jojo-gold text-gray-900 font-bold rounded transition-colors shadow-lg shadow-yellow-500/20 ${isSaving ? 'opacity-50 cursor-not-allowed' : 'hover:bg-yellow-400'}`}
             >
               <Save size={18} />
-              {t('forex.save')}
+              {isSaving ? 'Saving...' : t('forex.save')}
             </button>
           </div>
         </div>
