@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, distinct
+from sqlalchemy.exc import IntegrityError
 from datetime import datetime, date, timedelta, timezone
 import asyncio
 import logging
@@ -253,6 +254,19 @@ async def create_trade(
             detail={"code": "BILLING_REQUIRED", "message": "非Pro会员无法新增交易记录，请先开通Pro会员"},
         )
 
+    if trade_data.client_request_id:
+        existing_result = await db.execute(
+            select(Trade).where(
+                Trade.user_id == current_user.id,
+                Trade.client_request_id == trade_data.client_request_id,
+            )
+        )
+        existing_trade = existing_result.scalar_one_or_none()
+        if existing_trade is not None:
+            trade_dict = existing_trade.__dict__.copy()
+            trade_dict['risk_reward_ratio'] = existing_trade.theoretical_risk_reward_ratio
+            return TradeResponse(**trade_dict)
+
     stock_code = (trade_data.stock_code or "").strip()
     stock_name = trade_data.stock_name
     if (not stock_name or stock_name.strip() == "") and stock_code:
@@ -354,12 +368,30 @@ async def create_trade(
         theoretical_risk_reward_ratio=theoretical_rrr,  # 理论风险回报比
         actual_risk_reward_ratio=None,  # 开仓时无实际比率
         notes=trade_data.notes or "",
-        status="open"
+        status="open",
+        client_request_id=trade_data.client_request_id,
     )
     
     db.add(new_trade)
-    
-    await db.commit()
+
+    try:
+        await db.commit()
+    except IntegrityError as e:
+        await db.rollback()
+        if trade_data.client_request_id:
+            existing_result = await db.execute(
+                select(Trade).where(
+                    Trade.user_id == current_user.id,
+                    Trade.client_request_id == trade_data.client_request_id,
+                )
+            )
+            existing_trade = existing_result.scalar_one_or_none()
+            if existing_trade is not None:
+                trade_dict = existing_trade.__dict__.copy()
+                trade_dict['risk_reward_ratio'] = existing_trade.theoretical_risk_reward_ratio
+                return TradeResponse(**trade_dict)
+        raise HTTPException(status_code=409, detail=f"重复提交: {str(e)}")
+
     await db.refresh(new_trade)
     asyncio.create_task(_recalculate_strategy_capital_history_async(current_user.id, strategy.id, open_time.date()))
     
@@ -640,7 +672,7 @@ async def clear_all_trades(
             t.updated_at = datetime.utcnow()
 
         await db.commit()
-        await recalculate_strategy_capital_history(db, current_user.id, strategy.id, date.today())
+        await recalculate_strategy_capital_history(db, current_user.id, strategy.id, date.min)
         return {"message": "清空成功，资金曲线已重新计算", "deleted_count": len(trades)}
 
     result = await db.execute(
@@ -666,7 +698,7 @@ async def clear_all_trades(
     )
     strategy_ids = [row[0] for row in strat_result.fetchall() if row[0] is not None]
     for sid in strategy_ids:
-        await recalculate_strategy_capital_history(db, current_user.id, int(sid), date.today())
+        await recalculate_strategy_capital_history(db, current_user.id, int(sid), date.min)
 
     return {"message": "清空成功，资金曲线已重新计算", "deleted_count": len(trades)}
 
@@ -701,8 +733,13 @@ async def delete_trade(
     await db.commit()
     await db.refresh(trade)
     
-    strategy = await _get_stock_strategy(db, current_user, trade.strategy_id)
-    await recalculate_strategy_capital_history(db, current_user.id, strategy.id, date.today())
+    if trade.strategy_id is not None:
+        strategy = await _get_stock_strategy(db, current_user, trade.strategy_id)
+        anchor = trade.open_time.date() if trade.open_time is not None else date.today()
+        await recalculate_strategy_capital_history(db, current_user.id, strategy.id, anchor)
+    else:
+        anchor = getattr(current_user, "initial_capital_date", None) or date.today()
+        await recalculate_capital_history(db, current_user.id, anchor)
     
     return {"message": "删除成功，资金曲线已重新计算"}
 

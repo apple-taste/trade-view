@@ -9,6 +9,8 @@ const EMPTY_ANALYSIS: AnalysisData = {
     winRate: 0,
     totalProfit: 0,
     averageHoldingDays: 0,
+    averageHoldingDaysK: 0,
+    averageHoldingDaysActual: 0,
     stopLossExecuted: 0,
     takeProfitExecuted: 0,
     profitLossRatio: 0,
@@ -21,6 +23,8 @@ interface AnalysisData {
     winRate: number;
     totalProfit: number;
     averageHoldingDays: number;
+    averageHoldingDaysK: number;
+    averageHoldingDaysActual: number;
     stopLossExecuted: number;
     takeProfitExecuted: number;
     profitLossRatio: number;
@@ -205,8 +209,9 @@ export default function AnalysisPanel({ isMinimized = false, onToggleMinimize, s
                       <Clock className="text-purple-400" size={14} />
                       <p className="text-xs text-gray-400 font-medium">平均持仓</p>
                     </div>
-                    <p className="text-xl font-bold text-purple-400 mt-1">{analysis.summary.averageHoldingDays.toFixed(1)}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">天</p>
+                    <p className="text-xl font-bold text-purple-400 mt-1">{analysis.summary.averageHoldingDaysK.toFixed(1)}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">日K</p>
+                    <p className="text-xs text-gray-500 mt-0.5">实际 {analysis.summary.averageHoldingDaysActual.toFixed(2)} 天</p>
                   </div>
                 </div>
                 

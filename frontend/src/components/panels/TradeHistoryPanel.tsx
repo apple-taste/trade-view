@@ -108,6 +108,9 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
 
   const [showForm, setShowForm] = useState(false);
   const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submitLockRef = useRef(false);
+  const createRequestIdRef = useRef<string | null>(null);
   const [viewMode, setViewMode] = useState<'date' | 'all'>('date');
   const [stockCodes, setStockCodes] = useState<Array<{code: string; name: string}>>([]);
   const [selectedStockCode, setSelectedStockCode] = useState<string | null>(null);
@@ -443,15 +446,24 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitLockRef.current) return;
+    submitLockRef.current = true;
+    setIsSubmitting(true);
     try {
       if (effectiveStrategyId == null) {
         alert('请先创建并选择策略');
+        setIsSubmitting(false);
+        submitLockRef.current = false;
         return;
       }
 
       if (!editingTrade) {
         const canCreate = await ensureCanCreateTrade();
-        if (!canCreate) return;
+        if (!canCreate) {
+          setIsSubmitting(false);
+          submitLockRef.current = false;
+          return;
+        }
       }
 
       // 将北京时间转换为UTC时间发送给后端
@@ -491,6 +503,14 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
         console.log('📝 [编辑交易] 发送更新数据:', data);
         response = await axios.put(`/api/trades/${editingTrade.id}`, data);
       } else {
+        if (!createRequestIdRef.current) {
+          createRequestIdRef.current =
+            typeof crypto !== 'undefined' && typeof (crypto as any).randomUUID === 'function'
+              ? (crypto as any).randomUUID()
+              : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        }
+        data.client_request_id = createRequestIdRef.current;
+
         // 新建交易时，如果用户提供了手数，优先使用手数；否则使用单笔风险
         if (!data.shares && formData.risk_per_trade) {
           data.risk_per_trade = parseFloat(formData.risk_per_trade);
@@ -507,6 +527,9 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       setShowForm(false);
       setEditingTrade(null);
       resetForm();
+      createRequestIdRef.current = null;
+      setIsSubmitting(false);
+      submitLockRef.current = false;
 
       // 手动更新本地列表，减少视觉等待
       if (editingTrade) {
@@ -538,6 +561,8 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       console.error('❌ [交易操作] 操作失败:', error);
       // 如果失败，确保表单保持打开状态
       setShowForm(true);
+      setIsSubmitting(false);
+      submitLockRef.current = false;
       const detail = error.response?.data?.detail;
       const status = error.response?.status;
       const billingRequired =
@@ -1134,8 +1159,9 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
             <button
               type="submit"
               className="jojo-button"
+              disabled={isSubmitting}
             >
-              {editingTrade ? '更新' : '创建'}
+              {isSubmitting ? '提交中...' : editingTrade ? '更新' : '创建'}
             </button>
             <button
               type="button"
@@ -1143,8 +1169,12 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
                 setShowForm(false);
                 setEditingTrade(null);
                 resetForm();
+                createRequestIdRef.current = null;
+                setIsSubmitting(false);
+                submitLockRef.current = false;
               }}
               className="jojo-button-danger"
+              disabled={isSubmitting}
             >
               取消
             </button>

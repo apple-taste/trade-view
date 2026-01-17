@@ -822,15 +822,45 @@ async def recalculate_strategy_capital_history(db: AsyncSession, user_id: int, s
     if not strategy:
         raise HTTPException(status_code=404, detail="策略不存在")
 
-    if strategy.initial_date:
-        start_date = strategy.initial_date
+    if strategy.initial_date is None:
+        user_result = await db.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one_or_none()
+
+        min_dt_result = await db.execute(
+            select(func.min(Trade.open_time), func.min(Trade.close_time)).where(
+                Trade.user_id == user_id,
+                Trade.strategy_id == strategy_id,
+                Trade.is_deleted == False,
+            )
+        )
+        min_open_dt, min_close_dt = min_dt_result.one()
+        earliest_trade_dt = None
+        for dt in (min_open_dt, min_close_dt):
+            if dt is None:
+                continue
+            if earliest_trade_dt is None or dt < earliest_trade_dt:
+                earliest_trade_dt = dt
+
+        candidates: list[date] = []
+        if user and user.initial_capital_date:
+            candidates.append(user.initial_capital_date)
+        if earliest_trade_dt is not None:
+            candidates.append(earliest_trade_dt.date())
+
+        strategy.initial_date = min(candidates) if candidates else date.today()
+        if strategy.initial_capital is None:
+            strategy.initial_capital = float(user.initial_capital) if user and user.initial_capital is not None else 100000.0
+
+    anchor_date = strategy.initial_date
     initial_capital = float(strategy.initial_capital) if strategy.initial_capital is not None else 100000.0
+    if start_date < anchor_date:
+        start_date = anchor_date
 
     result = await db.execute(
         select(StrategyCapitalHistory).where(
             StrategyCapitalHistory.user_id == user_id,
             StrategyCapitalHistory.strategy_id == strategy_id,
-            StrategyCapitalHistory.date == start_date
+            StrategyCapitalHistory.date == anchor_date
         )
     )
     initial_record = result.scalar_one_or_none()
@@ -838,13 +868,52 @@ async def recalculate_strategy_capital_history(db: AsyncSession, user_id: int, s
         initial_record = StrategyCapitalHistory(
             user_id=user_id,
             strategy_id=strategy_id,
-            date=start_date,
+            date=anchor_date,
             capital=initial_capital,
             available_funds=initial_capital,
             position_value=0.0,
         )
         db.add(initial_record)
         await db.flush()
+
+    available_funds = initial_capital
+    position_value = 0.0
+    positions: dict[int, Trade] = {}
+    if start_date > anchor_date:
+        prev_result = await db.execute(
+            select(StrategyCapitalHistory)
+            .where(
+                StrategyCapitalHistory.user_id == user_id,
+                StrategyCapitalHistory.strategy_id == strategy_id,
+                StrategyCapitalHistory.date < start_date,
+            )
+            .order_by(StrategyCapitalHistory.date.desc())
+            .limit(1)
+        )
+        prev_record = prev_result.scalar_one_or_none() or initial_record
+        prev_date = prev_record.date
+        available_funds = float(prev_record.available_funds) if prev_record.available_funds is not None else float(prev_record.capital)
+
+        open_pos_result = await db.execute(
+            select(Trade).where(
+                Trade.user_id == user_id,
+                Trade.strategy_id == strategy_id,
+                Trade.is_deleted == False,
+                Trade.open_time.isnot(None),
+                func.date(Trade.open_time) <= prev_date,
+                or_(
+                    Trade.status == "open",
+                    and_(
+                        Trade.status == "closed",
+                        Trade.close_time.isnot(None),
+                        func.date(Trade.close_time) > prev_date,
+                    ),
+                ),
+            )
+        )
+        open_positions = open_pos_result.scalars().all()
+        positions = {t.id: t for t in open_positions}
+        position_value = sum((t.buy_price or 0) * (t.shares or 0) for t in open_positions)
 
     result = await db.execute(
         select(Trade)
@@ -876,26 +945,39 @@ async def recalculate_strategy_capital_history(db: AsyncSession, user_id: int, s
                 trade_events.append({'date': close_date, 'time': trade.close_time, 'type': 'close', 'trade': trade})
     trade_events.sort(key=lambda x: (x['date'], x['time']))
 
-    available_funds = initial_capital
-    positions: dict[int, Trade] = {}
     capital_records: dict[date, tuple[float, float, float]] = {}
-    capital_records[start_date] = (initial_capital, 0.0, initial_capital)
+    if start_date == anchor_date:
+        capital_records[start_date] = (initial_capital, 0.0, initial_capital)
 
     if not trade_events:
+        if start_date == anchor_date:
+            result = await db.execute(
+                select(StrategyCapitalHistory).where(
+                    StrategyCapitalHistory.user_id == user_id,
+                    StrategyCapitalHistory.strategy_id == strategy_id,
+                    StrategyCapitalHistory.date != anchor_date
+                )
+            )
+            records_to_delete = result.scalars().all()
+            for record in records_to_delete:
+                await db.delete(record)
+
+            initial_record.capital = initial_capital
+            initial_record.available_funds = initial_capital
+            initial_record.position_value = 0.0
+            await db.commit()
+            return
+
         result = await db.execute(
             select(StrategyCapitalHistory).where(
                 StrategyCapitalHistory.user_id == user_id,
                 StrategyCapitalHistory.strategy_id == strategy_id,
-                StrategyCapitalHistory.date != start_date
+                StrategyCapitalHistory.date >= start_date,
             )
         )
         records_to_delete = result.scalars().all()
         for record in records_to_delete:
             await db.delete(record)
-
-        initial_record.capital = initial_capital
-        initial_record.available_funds = initial_capital
-        initial_record.position_value = 0.0
         await db.commit()
         return
 
@@ -907,6 +989,7 @@ async def recalculate_strategy_capital_history(db: AsyncSession, user_id: int, s
             buy_commission = trade.buy_commission if trade.buy_commission is not None else (trade.commission or 0)
             cost = trade.buy_price * trade.shares + buy_commission
             available_funds -= cost
+            position_value += trade.buy_price * trade.shares
             positions[trade.id] = trade
         elif event['type'] == 'close' and trade.sell_price:
             if trade.profit_loss is not None:
@@ -924,11 +1007,9 @@ async def recalculate_strategy_capital_history(db: AsyncSession, user_id: int, s
                         trade.stock_code
                     )
                 available_funds += sell_amount - sell_commission
-            positions.pop(trade.id, None)
-
-        position_value = 0.0
-        for pos_trade in positions.values():
-            position_value += pos_trade.buy_price * pos_trade.shares
+            if trade.id in positions:
+                position_value -= trade.buy_price * trade.shares
+                positions.pop(trade.id, None)
         total_assets = available_funds + position_value
         capital_records[trade_date] = (available_funds, position_value, total_assets)
 

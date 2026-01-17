@@ -201,6 +201,7 @@ class TradeCreate(BaseModel):
     notes: Optional[str] = None
     risk_per_trade: Optional[float] = None  # 单笔风险金额（可选，用于自动计算手数）
     strategy_id: Optional[int] = None
+    client_request_id: Optional[str] = None
 
     class Config:
         json_schema_extra = {
@@ -301,6 +302,8 @@ class AnalysisSummary(BaseModel):
     winRate: float
     totalProfit: float
     averageHoldingDays: float
+    averageHoldingDaysK: float = 0.0
+    averageHoldingDaysActual: float = 0.0
     stopLossExecuted: int
     takeProfitExecuted: int
     profitLossRatio: float = 0.0  # 盈亏比
@@ -360,6 +363,7 @@ class ForexTradeCreate(BaseModel):
     swap: Optional[float] = 0
     notes: Optional[str] = None
     strategy_id: Optional[int] = None
+    client_request_id: Optional[str] = None
 
 class ForexTradeUpdate(BaseModel):
     sl: Optional[float] = None

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { useForex, type ForexTrade, type ForexSide, type ForexQuote } from '../../contexts/ForexContext';
 import { useLocale } from '../../contexts/LocaleContext';
@@ -59,6 +59,9 @@ export default function ForexTerminal() {
   const { refreshBillingStatus } = useAuth();
   const [activeTab, setActiveTab] = useState<ActiveTab>('OPEN');
   const [createOpen, setCreateOpen] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const createLockRef = useRef(false);
+  const createRequestIdRef = useRef<string | null>(null);
   const [closeTarget, setCloseTarget] = useState<ForexTrade | null>(null);
   const [editTarget, setEditTarget] = useState<ForexTrade | null>(null);
   const [lotsManuallySet, setLotsManuallySet] = useState(false);
@@ -186,6 +189,9 @@ export default function ForexTerminal() {
   };
 
   const handleCreate = async () => {
+    if (createLockRef.current) return;
+    createLockRef.current = true;
+    setIsCreating(true);
     try {
       const canCreate = await ensureCanCreateTrade();
       if (!canCreate) return;
@@ -195,6 +201,13 @@ export default function ForexTerminal() {
       if (!createForm.symbol.trim()) throw new Error('Symbol required');
       if (!Number.isFinite(lots) || lots <= 0) throw new Error('Invalid lots');
       if (!Number.isFinite(openPrice) || openPrice <= 0) throw new Error('Invalid open price');
+
+      if (!createRequestIdRef.current) {
+        createRequestIdRef.current =
+          typeof crypto !== 'undefined' && typeof (crypto as any).randomUUID === 'function'
+            ? (crypto as any).randomUUID()
+            : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      }
 
       await createTrade({
         symbol: createForm.symbol.trim().toUpperCase(),
@@ -207,9 +220,11 @@ export default function ForexTerminal() {
         commission: createForm.commission ? Number(createForm.commission) : undefined,
         swap: createForm.swap ? Number(createForm.swap) : undefined,
         notes: createForm.notes ? createForm.notes : undefined,
+        client_request_id: createRequestIdRef.current || undefined,
       });
       setCreateOpen(false);
       await refresh();
+      createRequestIdRef.current = null;
     } catch (err: any) {
       const detail = err?.response?.data?.detail;
       const status = err?.response?.status;
@@ -236,6 +251,9 @@ export default function ForexTerminal() {
         err?.message ||
         '操作失败';
       alert(msg);
+    } finally {
+      setIsCreating(false);
+      createLockRef.current = false;
     }
   };
 
@@ -786,14 +804,24 @@ export default function ForexTerminal() {
               </div>
             </div>
             <div className="p-4 border-t border-gray-700 bg-gray-900 flex justify-end gap-2">
-              <button onClick={() => setCreateOpen(false)} className="px-4 py-2 text-gray-400 hover:text-white transition-colors">
+              <button
+                onClick={() => {
+                  setCreateOpen(false);
+                  createRequestIdRef.current = null;
+                  setIsCreating(false);
+                  createLockRef.current = false;
+                }}
+                className="px-4 py-2 text-gray-400 hover:text-white transition-colors"
+                disabled={isCreating}
+              >
                 {t('forex.cancel')}
               </button>
               <button
                 onClick={handleCreate}
                 className="px-6 py-2 bg-jojo-gold text-gray-900 font-bold rounded hover:bg-yellow-400 transition-colors"
+                disabled={isCreating}
               >
-                {t('forex.save')}
+                {isCreating ? '提交中...' : t('forex.save')}
               </button>
             </div>
           </div>

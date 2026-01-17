@@ -528,7 +528,15 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
                   strokeWidth={3}
                   dot={{ fill: '#FFD700', r: 4 }}
                   activeDot={{ r: 6 }}
-                  name="资金"
+                  name="总资产"
+                />
+                <Line 
+                  type="monotone" 
+                  dataKey="available_funds" 
+                  stroke="#10B981" 
+                  strokeWidth={2}
+                  dot={{ fill: '#10B981', r: 3 }}
+                  name="可用资金"
                 />
               </LineChart>
             </ResponsiveContainer>

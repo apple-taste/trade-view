@@ -149,6 +149,7 @@ class Trade(Base):
     notes = Column(Text)
     status = Column(String, default="open", index=True)
     is_deleted = Column(Boolean, default=False, index=True)  # 软删除标记
+    client_request_id = Column(String, nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -228,6 +229,7 @@ class ForexTrade(Base):
     notes = Column(Text)
     status = Column(String, default="open", index=True)
     is_deleted = Column(Boolean, default=False, index=True)
+    client_request_id = Column(String, nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -258,11 +260,21 @@ async def init_db():
             cols = [row[1] for row in result.fetchall()]
             if "strategy_id" not in cols:
                 await conn.exec_driver_sql("ALTER TABLE trades ADD COLUMN strategy_id INTEGER")
+            if "client_request_id" not in cols:
+                await conn.exec_driver_sql("ALTER TABLE trades ADD COLUMN client_request_id VARCHAR")
+            await conn.exec_driver_sql(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_trades_user_client_request_id ON trades(user_id, client_request_id) WHERE client_request_id IS NOT NULL"
+            )
 
             result = await conn.exec_driver_sql("PRAGMA table_info(forex_trades)")
             cols = [row[1] for row in result.fetchall()]
             if "strategy_id" not in cols:
                 await conn.exec_driver_sql("ALTER TABLE forex_trades ADD COLUMN strategy_id INTEGER")
+            if "client_request_id" not in cols:
+                await conn.exec_driver_sql("ALTER TABLE forex_trades ADD COLUMN client_request_id VARCHAR")
+            await conn.exec_driver_sql(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_forex_trades_user_client_request_id ON forex_trades(user_id, client_request_id) WHERE client_request_id IS NOT NULL"
+            )
 
             result = await conn.exec_driver_sql("PRAGMA table_info(forex_accounts)")
             cols = [row[1] for row in result.fetchall()]
@@ -281,6 +293,14 @@ async def init_db():
         else:
             await conn.exec_driver_sql("ALTER TABLE trades ADD COLUMN IF NOT EXISTS strategy_id INTEGER")
             await conn.exec_driver_sql("ALTER TABLE forex_trades ADD COLUMN IF NOT EXISTS strategy_id INTEGER")
+            await conn.exec_driver_sql("ALTER TABLE trades ADD COLUMN IF NOT EXISTS client_request_id VARCHAR")
+            await conn.exec_driver_sql("ALTER TABLE forex_trades ADD COLUMN IF NOT EXISTS client_request_id VARCHAR")
+            await conn.exec_driver_sql(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_trades_user_client_request_id ON trades(user_id, client_request_id) WHERE client_request_id IS NOT NULL"
+            )
+            await conn.exec_driver_sql(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_forex_trades_user_client_request_id ON forex_trades(user_id, client_request_id) WHERE client_request_id IS NOT NULL"
+            )
             await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE")
             await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP")
             await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_paid BOOLEAN DEFAULT FALSE")

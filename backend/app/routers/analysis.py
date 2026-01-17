@@ -199,9 +199,13 @@ async def analyze_trades(
         if system_mode == "forex":
             if trade.status == "closed" and trade.close_price:
                 profit = float(trade.profit or 0)
-                holding_days = 0
+                holding_days_k = 0
+                holding_days_actual = 0.0
                 if trade.open_time and trade.close_time:
-                    holding_days = max(0, (trade.close_time - trade.open_time).days)
+                    delta_seconds = (trade.close_time - trade.open_time).total_seconds()
+                    holding_days_actual = max(0.0, delta_seconds / 86400.0)
+                    day_delta = (trade.close_time.date() - trade.open_time.date()).days
+                    holding_days_k = max(0, day_delta + 1)
                 trades_data.append({
                     "id": trade.id,
                     "stock_code": trade.symbol,  # 复用字段名以兼容AI分析器
@@ -216,7 +220,9 @@ async def analyze_trades(
                     "sell_commission": float(trade.commission or 0),
                     "profit": profit,
                     "profit_loss": profit,
-                    "holding_days": holding_days,
+                    "holding_days": holding_days_k,
+                    "holding_days_k": holding_days_k,
+                    "holding_days_actual": holding_days_actual,
                     "order_result": None,
                     "status": trade.status,
                     "open_time": trade.open_time.isoformat() if trade.open_time else None,
@@ -232,6 +238,14 @@ async def analyze_trades(
                     profit = trade.profit_loss
                 else:
                     profit = (trade.sell_price - trade.buy_price) * trade.shares - (trade.commission or 0)
+
+                holding_days_k = 0
+                holding_days_actual = 0.0
+                if trade.open_time and trade.close_time:
+                    delta_seconds = (trade.close_time - trade.open_time).total_seconds()
+                    holding_days_actual = max(0.0, delta_seconds / 86400.0)
+                    day_delta = (trade.close_time.date() - trade.open_time.date()).days
+                    holding_days_k = max(0, day_delta + 1)
                 
                 trades_data.append({
                     "id": trade.id,
@@ -247,7 +261,9 @@ async def analyze_trades(
                     "sell_commission": trade.sell_commission or 0,
                     "profit": profit,
                     "profit_loss": trade.profit_loss,  # 保存原始盈亏字段
-                    "holding_days": trade.holding_days or 0,
+                    "holding_days": holding_days_k,
+                    "holding_days_k": holding_days_k,
+                    "holding_days_actual": holding_days_actual,
                     "order_result": trade.order_result,
                     "status": trade.status,
                     "open_time": trade.open_time.isoformat() if trade.open_time else None,
@@ -301,7 +317,8 @@ async def analyze_trades(
     win_trades = len(df[df["profit"] > 0])
     win_rate = (win_trades / total_trades * 100) if total_trades > 0 else 0
     total_profit = df["profit"].sum()
-    avg_holding_days = df["holding_days"].mean()
+    avg_holding_days_k = df["holding_days_k"].mean() if "holding_days_k" in df.columns else df["holding_days"].mean()
+    avg_holding_days_actual = df["holding_days_actual"].mean() if "holding_days_actual" in df.columns else df["holding_days"].mean()
     
     stop_loss_executed = len(df[df["order_result"] == "止损"])
     take_profit_executed = len(df[df["order_result"] == "止盈"])
@@ -316,7 +333,9 @@ async def analyze_trades(
         totalTrades=total_trades,
         winRate=round(win_rate, 2),
         totalProfit=round(total_profit, 2),
-        averageHoldingDays=round(avg_holding_days, 1),
+        averageHoldingDays=round(avg_holding_days_actual, 1),
+        averageHoldingDaysK=round(avg_holding_days_k, 1),
+        averageHoldingDaysActual=round(avg_holding_days_actual, 2),
         stopLossExecuted=stop_loss_executed,
         takeProfitExecuted=take_profit_executed,
         profitLossRatio=round(profit_loss_ratio, 2)

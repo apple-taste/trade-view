@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update, and_, or_
+from sqlalchemy.exc import IntegrityError
 from datetime import datetime, date, timezone, timedelta
 import asyncio
 import time
@@ -527,6 +528,17 @@ async def create_trade(
             detail={"code": "BILLING_REQUIRED", "message": "非Pro会员无法新增交易记录，请先开通Pro会员"},
         )
 
+    if payload.client_request_id:
+        existing_result = await db.execute(
+            select(ForexTrade).where(
+                ForexTrade.user_id == current_user.id,
+                ForexTrade.client_request_id == payload.client_request_id,
+            )
+        )
+        existing_trade = existing_result.scalar_one_or_none()
+        if existing_trade is not None:
+            return _to_trade_response(existing_trade)
+
     requested_strategy_id = payload.strategy_id if payload.strategy_id is not None else strategy_id
     strategy = await _get_forex_strategy(db, current_user, requested_strategy_id)
     open_time = payload.open_time
@@ -550,10 +562,26 @@ async def create_trade(
         notes=payload.notes,
         status="open",
         is_deleted=False,
+        client_request_id=payload.client_request_id,
     )
     db.add(trade)
 
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as e:
+        await db.rollback()
+        if payload.client_request_id:
+            existing_result = await db.execute(
+                select(ForexTrade).where(
+                    ForexTrade.user_id == current_user.id,
+                    ForexTrade.client_request_id == payload.client_request_id,
+                )
+            )
+            existing_trade = existing_result.scalar_one_or_none()
+            if existing_trade is not None:
+                return _to_trade_response(existing_trade)
+        raise HTTPException(status_code=409, detail=f"重复提交: {str(e)}")
+
     await db.refresh(trade)
     asyncio.create_task(_recalculate_account_async(current_user.id, strategy.id))
     return _to_trade_response(trade)

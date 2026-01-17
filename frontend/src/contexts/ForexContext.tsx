@@ -67,6 +67,7 @@ export type ForexTradeCreatePayload = {
   swap?: number;
   notes?: string;
   strategy_id?: number;
+  client_request_id?: string;
 };
 
 export type ForexTradeClosePayload = {
