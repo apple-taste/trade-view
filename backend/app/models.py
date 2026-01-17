@@ -81,6 +81,85 @@ class AdminUserUpdate(BaseModel):
     plan: Optional[str] = None
     total_paid: Optional[float] = None
 
+class BillingPlanPriceItem(BaseModel):
+    plan: str
+    unit_price_cents: int
+    currency: str
+    updated_at: Optional[datetime] = None
+
+class AdminBillingPlanPricesResponse(BaseModel):
+    items: List[BillingPlanPriceItem]
+
+
+class BillingStatusResponse(BaseModel):
+    billing_enabled: bool
+    is_paid: bool
+    paid_until: Optional[date] = None
+    plan: Optional[str] = None
+
+class BillingPricingResponse(BaseModel):
+    plan: str
+    months: int
+    unit_price_cents: int
+    amount_cents: int
+    currency: str
+
+class AdminBillingPlanPriceUpdate(BaseModel):
+    unit_price_cents: int
+    currency: Optional[str] = None
+
+
+class PaymentOrderCreate(BaseModel):
+    channel: str
+    plan: str = "pro"
+    months: int = 1
+
+
+class PaymentOrderNoteUpdate(BaseModel):
+    note: str
+
+
+class PaymentOrderItem(BaseModel):
+    order_no: str
+    user_id: int
+    channel: str
+    amount_cents: int
+    currency: str
+    plan: str
+    months: int
+    status: str
+    note: Optional[str] = None
+    approved_by_admin: Optional[str] = None
+    approved_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class PaymentOrderCreateResponse(BaseModel):
+    order: PaymentOrderItem
+    instructions: str
+    wechat_pay_qr_url: Optional[str] = None
+    alipay_pay_qr_url: Optional[str] = None
+
+
+class PaginatedPaymentOrderResponse(BaseModel):
+    items: List[PaymentOrderItem]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class PaymentQrConfigResponse(BaseModel):
+    wechat_pay_qr_url: Optional[str] = None
+    alipay_pay_qr_url: Optional[str] = None
+    receiver_note: Optional[str] = None
+
+
+class PaymentQrUploadResponse(BaseModel):
+    channel: str
+    url: str
+
 # 资金相关
 class CapitalUpdate(BaseModel):
     capital: float

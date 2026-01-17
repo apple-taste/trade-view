@@ -6,6 +6,21 @@ from sqlalchemy import select
 
 from app.database import get_db, User
 import os
+from datetime import date
+
+
+def billing_enabled() -> bool:
+    v = (os.getenv("BILLING_ENABLED", "false") or "").strip().lower()
+    return v in {"1", "true", "yes", "on"}
+
+
+def user_has_active_subscription(user: User) -> bool:
+    if bool(getattr(user, "is_paid", False)):
+        return True
+    paid_until = getattr(user, "paid_until", None)
+    if paid_until is None:
+        return False
+    return bool(paid_until >= date.today())
 
 SECRET_KEY = os.getenv("JWT_SECRET", "your-secret-key-change-in-production")
 ALGORITHM = "HS256"

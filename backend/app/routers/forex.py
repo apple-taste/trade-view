@@ -6,7 +6,7 @@ import time
 import aiohttp
 
 from app.database import get_db, User, ForexAccount, ForexTrade, Strategy
-from app.middleware.auth import get_current_user
+from app.middleware.auth import get_current_user, billing_enabled, user_has_active_subscription
 from app.routers.user import _get_forex_strategy
 from app.models import (
     ForexAccountResponse,
@@ -513,6 +513,8 @@ async def create_trade(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    if billing_enabled() and not user_has_active_subscription(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="非会员无法新增交易记录，请先开通会员")
     requested_strategy_id = payload.strategy_id if payload.strategy_id is not None else strategy_id
     strategy = await _get_forex_strategy(db, current_user, requested_strategy_id)
     open_time = payload.open_time

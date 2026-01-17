@@ -369,30 +369,25 @@ async def health_check(request: Request):
 
 # 静态文件服务（必须放在所有API路由之后）
 static_dir = Path(__file__).parent / "static"
-if static_dir.exists():
-    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
-    logger.info(f"✅ 静态文件服务已挂载: {static_dir}")
-    
-    # SPA路由：所有非API请求返回index.html（必须在最后注册）
+static_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+logger.info(f"✅ 静态文件服务已挂载: {static_dir}")
+
+index_file = static_dir / "index.html"
+if index_file.exists():
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
-        # 排除API路径和文档路径
         if full_path.startswith("api/") or full_path.startswith("docs") or full_path.startswith("openapi.json"):
             return {"error": "Not found"}
-        
-        # 检查是否是静态资源
+
         static_file = static_dir / full_path
         if static_file.exists() and static_file.is_file():
             return FileResponse(str(static_file))
-        
-        # 返回index.html（SPA路由）
-        index_file = static_dir / "index.html"
+
         if index_file.exists():
             return FileResponse(str(index_file))
-        
+
         return {"error": "Not found"}
-else:
-    logger.warning(f"⚠️  静态文件目录不存在: {static_dir}（前端可能未构建）")
 
 if __name__ == "__main__":
     # 读取PORT环境变量，默认3000

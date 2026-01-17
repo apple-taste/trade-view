@@ -4,13 +4,91 @@ from sqlalchemy import select, func, or_, and_
 from datetime import date, datetime, timedelta
 import uuid
 
-from app.database import get_db, User, CapitalHistory, Trade, Strategy, StrategyCapitalHistory, ForexTrade, ForexAccount
-from app.middleware.auth import get_current_user
-from app.models import CapitalUpdate, CapitalHistoryItem, UserResponse, StrategyCreate, StrategyResponse
+from app.database import (
+    get_db,
+    User,
+    CapitalHistory,
+    Trade,
+    Strategy,
+    StrategyCapitalHistory,
+    ForexTrade,
+    ForexAccount,
+    PaymentOrder,
+    BillingPlanPrice,
+)
+from app.middleware.auth import get_current_user, billing_enabled, user_has_active_subscription
+from app.models import (
+    CapitalUpdate,
+    CapitalHistoryItem,
+    UserResponse,
+    StrategyCreate,
+    StrategyResponse,
+    BillingStatusResponse,
+    BillingPricingResponse,
+    PaymentOrderCreate,
+    PaymentOrderNoteUpdate,
+    PaymentOrderItem,
+    PaymentOrderCreateResponse,
+    PaymentQrConfigResponse,
+)
 from app.services.commission_calculator import default_calculator
 from app.services.email_service import default_email_service
+import os
+from pathlib import Path
 
 router = APIRouter()
+
+
+async def _resolve_plan_unit_price_cents(db: AsyncSession, plan: str) -> tuple[int, str]:
+    plan_key = (plan or "").strip().lower()
+    if plan_key == "free":
+        return 0, "CNY"
+
+    result = await db.execute(select(BillingPlanPrice).where(BillingPlanPrice.plan == plan_key).limit(1))
+    row = result.scalar_one_or_none()
+    if row and int(getattr(row, "unit_price_cents", 0) or 0) > 0:
+        return int(row.unit_price_cents), str(row.currency or "CNY")
+
+    env_key = f"BILLING_PLAN_{plan_key.upper()}_PRICE_CENTS"
+    raw = (os.getenv(env_key, "") or "").strip()
+    if raw.isdigit():
+        unit_price = int(raw)
+    else:
+        unit_price = 9900 if plan_key == "pro" else 19900
+
+    return int(unit_price), "CNY"
+
+
+async def _get_price_cents(db: AsyncSession, plan: str, months: int) -> tuple[int, int, str]:
+    plan_key = (plan or "").strip().lower()
+    if plan_key == "free":
+        return 0, 0, "CNY"
+    if months <= 0:
+        raise HTTPException(status_code=400, detail="months 必须大于 0")
+
+    unit_price_cents, currency = await _resolve_plan_unit_price_cents(db, plan_key)
+    amount_cents = int(unit_price_cents) * int(months)
+    return int(unit_price_cents), int(amount_cents), str(currency or "CNY")
+
+
+def _resolve_payment_qr_urls() -> tuple[str | None, str | None, str | None]:
+    wechat_env = (os.getenv("WECHAT_PAY_QR_URL") or "").strip() or None
+    alipay_env = (os.getenv("ALIPAY_PAY_QR_URL") or "").strip() or None
+    receiver_note = (os.getenv("PAYMENT_RECEIVER_NOTE") or "").strip() or None
+
+    backend_dir = Path(__file__).resolve().parents[2]
+    payment_dir = backend_dir / "static" / "payments"
+
+    def find_static(channel: str) -> str | None:
+        for ext in (".png", ".jpg", ".jpeg", ".webp"):
+            fp = payment_dir / f"{channel}_qr{ext}"
+            if fp.exists() and fp.is_file():
+                return f"/static/payments/{fp.name}"
+        return None
+
+    wechat = find_static("wechat") or wechat_env
+    alipay = find_static("alipay") or alipay_env
+    return wechat, alipay, receiver_note
 
 async def _ensure_default_stock_strategy(db: AsyncSession, user: User) -> Strategy:
     result = await db.execute(
@@ -134,6 +212,217 @@ async def get_profile(current_user: User = Depends(get_current_user)):
         email=current_user.email,
         email_alerts_enabled=current_user.email_alerts_enabled or False,
         created_at=current_user.created_at
+    )
+
+
+@router.get("/billing-status", response_model=BillingStatusResponse, summary="获取计费状态")
+async def get_billing_status(current_user: User = Depends(get_current_user)):
+    return BillingStatusResponse(
+        billing_enabled=billing_enabled(),
+        is_paid=user_has_active_subscription(current_user),
+        paid_until=getattr(current_user, "paid_until", None),
+        plan=getattr(current_user, "plan", None),
+    )
+
+
+@router.get("/payment-qrs", response_model=PaymentQrConfigResponse, summary="获取收款码配置")
+async def get_payment_qrs(_: User = Depends(get_current_user)):
+    wechat, alipay, receiver_note = _resolve_payment_qr_urls()
+    return PaymentQrConfigResponse(
+        wechat_pay_qr_url=wechat,
+        alipay_pay_qr_url=alipay,
+        receiver_note=receiver_note,
+    )
+
+
+@router.get("/billing-plans/{plan}/price", response_model=BillingPricingResponse, summary="获取会员价格")
+async def get_billing_plan_price(
+    plan: str,
+    months: int = 1,
+    _: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    plan_key = (plan or "").strip().lower()
+    unit_price_cents, amount_cents, currency = await _get_price_cents(db, plan_key, int(months or 1))
+    return BillingPricingResponse(
+        plan=plan_key,
+        months=int(months or 1),
+        unit_price_cents=unit_price_cents,
+        amount_cents=amount_cents,
+        currency=currency,
+    )
+
+
+@router.post("/payment-orders", response_model=PaymentOrderCreateResponse, summary="创建支付订单（微信/支付宝）")
+async def create_payment_order(
+    payload: PaymentOrderCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not billing_enabled():
+        raise HTTPException(status_code=400, detail="当前未开启收费")
+
+    channel = (payload.channel or "").strip().lower()
+    if channel not in {"wechat", "alipay"}:
+        raise HTTPException(status_code=400, detail="channel 必须是 wechat 或 alipay")
+
+    plan = (payload.plan or "pro").strip().lower()
+    months = int(payload.months or 1)
+    _, amount_cents, currency = await _get_price_cents(db, plan, months)
+    if amount_cents <= 0:
+        raise HTTPException(status_code=400, detail="该套餐不可购买")
+
+    order_no = uuid.uuid4().hex
+    order = PaymentOrder(
+        user_id=current_user.id,
+        order_no=order_no,
+        channel=channel,
+        amount_cents=amount_cents,
+        currency=currency,
+        plan=plan,
+        months=months,
+        status="pending",
+    )
+    db.add(order)
+    await db.commit()
+    await db.refresh(order)
+
+    wechat_pay_qr_url, alipay_pay_qr_url, receiver_note = _resolve_payment_qr_urls()
+
+    parts = [
+        f"订单号：{order_no}",
+        f"金额：{amount_cents / 100:.2f} CNY",
+        f"渠道：{'微信' if channel == 'wechat' else '支付宝'}",
+        "请完成支付后，等待管理员审核开通。",
+    ]
+    if receiver_note:
+        parts.append(receiver_note)
+    instructions = "\n".join(parts)
+
+    return PaymentOrderCreateResponse(
+        order=PaymentOrderItem(
+            order_no=order.order_no,
+            user_id=order.user_id,
+            channel=order.channel,
+            amount_cents=order.amount_cents,
+            currency=order.currency,
+            plan=order.plan,
+            months=order.months,
+            status=order.status,
+            note=order.note,
+            approved_by_admin=order.approved_by_admin,
+            approved_at=order.approved_at,
+            created_at=order.created_at,
+            updated_at=order.updated_at,
+        ),
+        instructions=instructions,
+        wechat_pay_qr_url=wechat_pay_qr_url,
+        alipay_pay_qr_url=alipay_pay_qr_url,
+    )
+
+
+@router.get("/payment-orders", response_model=list[PaymentOrderItem], summary="查看我的支付订单")
+async def list_my_payment_orders(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(PaymentOrder)
+        .where(PaymentOrder.user_id == current_user.id)
+        .order_by(PaymentOrder.created_at.desc())
+        .limit(50)
+    )
+    orders = result.scalars().all()
+    return [
+        PaymentOrderItem(
+            order_no=o.order_no,
+            user_id=o.user_id,
+            channel=o.channel,
+            amount_cents=o.amount_cents,
+            currency=o.currency,
+            plan=o.plan,
+            months=o.months,
+            status=o.status,
+            note=o.note,
+            approved_by_admin=o.approved_by_admin,
+            approved_at=o.approved_at,
+            created_at=o.created_at,
+            updated_at=o.updated_at,
+        )
+        for o in orders
+    ]
+
+
+@router.get("/payment-orders/{order_no}", response_model=PaymentOrderItem, summary="查看我的支付订单详情")
+async def get_my_payment_order(
+    order_no: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(PaymentOrder).where(PaymentOrder.order_no == order_no, PaymentOrder.user_id == current_user.id)
+    )
+    order = result.scalar_one_or_none()
+    if order is None:
+        raise HTTPException(status_code=404, detail="订单不存在")
+
+    return PaymentOrderItem(
+        order_no=order.order_no,
+        user_id=order.user_id,
+        channel=order.channel,
+        amount_cents=order.amount_cents,
+        currency=order.currency,
+        plan=order.plan,
+        months=order.months,
+        status=order.status,
+        note=order.note,
+        approved_by_admin=order.approved_by_admin,
+        approved_at=order.approved_at,
+        created_at=order.created_at,
+        updated_at=order.updated_at,
+    )
+
+
+@router.patch("/payment-orders/{order_no}/note", response_model=PaymentOrderItem, summary="更新支付订单备注")
+async def update_my_payment_order_note(
+    order_no: str,
+    payload: PaymentOrderNoteUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    note = (payload.note or "").strip()
+    if not note:
+        raise HTTPException(status_code=400, detail="note 不能为空")
+    if len(note) > 500:
+        raise HTTPException(status_code=400, detail="note 过长（最多 500 字）")
+
+    result = await db.execute(
+        select(PaymentOrder).where(PaymentOrder.order_no == order_no, PaymentOrder.user_id == current_user.id)
+    )
+    order = result.scalar_one_or_none()
+    if order is None:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    if order.status != "pending":
+        raise HTTPException(status_code=400, detail="仅可修改待审核订单的备注")
+
+    order.note = note
+    await db.commit()
+    await db.refresh(order)
+
+    return PaymentOrderItem(
+        order_no=order.order_no,
+        user_id=order.user_id,
+        channel=order.channel,
+        amount_cents=order.amount_cents,
+        currency=order.currency,
+        plan=order.plan,
+        months=order.months,
+        status=order.status,
+        note=order.note,
+        approved_by_admin=order.approved_by_admin,
+        approved_at=order.approved_at,
+        created_at=order.created_at,
+        updated_at=order.updated_at,
     )
 
 @router.post(

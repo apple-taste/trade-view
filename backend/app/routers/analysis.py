@@ -9,7 +9,7 @@ import json
 from datetime import datetime, date
 
 from app.database import get_db, Trade, CapitalHistory, StrategyCapitalHistory, ForexTrade, ForexAccount
-from app.middleware.auth import get_current_user
+from app.middleware.auth import get_current_user, billing_enabled, user_has_active_subscription
 from app.models import AnalysisResponse, AnalysisSummary, DetailedAnalysis
 from app.database import User
 from app.routers.user import _get_stock_strategy, _get_forex_strategy
@@ -83,6 +83,8 @@ async def analyze_trades(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    if use_ai and billing_enabled() and not user_has_active_subscription(current_user):
+        raise HTTPException(status_code=402, detail="需要付费才能使用AI分析")
     logger.info(f"🤖 [AI分析] 用户 {current_user.username} 开始交易分析")
     
     trades = []

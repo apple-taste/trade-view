@@ -70,6 +70,40 @@ class User(Base):
     email_alerts_enabled = Column(Boolean, default=False)  # 是否启用邮箱提醒
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class PaymentOrder(Base):
+    __tablename__ = "payment_orders"
+    __table_args__ = (
+        UniqueConstraint("order_no", name="uq_payment_orders_order_no"),
+        Index("idx_payment_orders_user_created_at", "user_id", "created_at"),
+        Index("idx_payment_orders_status_created_at", "status", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    order_no = Column(String, nullable=False, index=True)
+    channel = Column(String, nullable=False)
+    amount_cents = Column(Integer, nullable=False, default=0)
+    currency = Column(String, nullable=False, default="CNY")
+    plan = Column(String, nullable=False, default="pro")
+    months = Column(Integer, nullable=False, default=1)
+    status = Column(String, nullable=False, default="pending")
+    note = Column(Text, nullable=True)
+    approved_by_admin = Column(String, nullable=True)
+    approved_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class BillingPlanPrice(Base):
+    __tablename__ = "billing_plan_prices"
+    __table_args__ = (UniqueConstraint("plan", name="uq_billing_plan_prices_plan"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    plan = Column(String, nullable=False, index=True)
+    unit_price_cents = Column(Integer, nullable=False, default=0)
+    currency = Column(String, nullable=False, default="CNY")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 class CapitalHistory(Base):
     __tablename__ = "capital_history"
     __table_args__ = (UniqueConstraint('user_id', 'date', name='_user_date_uc'),)

@@ -26,6 +26,34 @@ interface UserPanelProps {
   showChart?: boolean;
 }
 
+interface BillingStatus {
+  billing_enabled: boolean;
+  is_paid: boolean;
+  paid_until?: string | null;
+  plan?: string | null;
+}
+
+interface PaymentOrderItem {
+  order_no: string;
+  user_id: number;
+  channel: string;
+  amount_cents: number;
+  currency: string;
+  plan: string;
+  months: number;
+  status: string;
+  note?: string | null;
+  approved_by_admin?: string | null;
+  approved_at?: string | null;
+  created_at?: string | null;
+}
+
+interface PaymentQrs {
+  wechat_pay_qr_url?: string | null;
+  alipay_pay_qr_url?: string | null;
+  receiver_note?: string | null;
+}
+
 export default function UserPanel({ compact = false, showChart = false }: UserPanelProps) {
   const { user } = useAuth();
   const { confirm, Modal } = useJojoModal();
@@ -43,6 +71,13 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
   const [compareStrategies, setCompareStrategies] = useState<Array<{ id: number; name: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [emailAlertsEnabled, setEmailAlertsEnabled] = useState<boolean>(false);
+  const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null);
+  const [paymentOrders, setPaymentOrders] = useState<PaymentOrderItem[]>([]);
+  const [paymentQrs, setPaymentQrs] = useState<PaymentQrs | null>(null);
+  const [creatingOrder, setCreatingOrder] = useState(false);
+  const [purchaseMonths, setPurchaseMonths] = useState<number>(1);
+  const [paymentNote, setPaymentNote] = useState('');
+  const [savingPaymentNote, setSavingPaymentNote] = useState(false);
   const { _userPanelRefreshKey, refreshUserPanel, refreshAnalysis, effectiveStrategyId, strategies } = useTrade();
 
   const CHART_COLORS = [
@@ -67,6 +102,9 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
       fetchCapitalData(getStartDate(period));
     }
     fetchUserProfile();
+    fetchBillingStatus();
+    fetchPaymentOrders();
+    fetchPaymentQrs();
   }, [_userPanelRefreshKey, chartMode, period, effectiveStrategyId, showChart]); // 当refresh key变化时刷新
 
   const fetchUserProfile = async () => {
@@ -75,6 +113,80 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
       setEmailAlertsEnabled(response.data.email_alerts_enabled || false);
     } catch (error) {
       logger.error('❌ [UserPanel] 获取用户设置失败', error);
+    }
+  };
+
+  const fetchBillingStatus = async () => {
+    try {
+      const res = await axios.get('/api/user/billing-status');
+      setBillingStatus(res.data);
+    } catch (error) {
+      setBillingStatus(null);
+    }
+  };
+
+  const fetchPaymentOrders = async () => {
+    try {
+      const res = await axios.get('/api/user/payment-orders');
+      setPaymentOrders(Array.isArray(res.data) ? res.data : []);
+    } catch (error) {
+      setPaymentOrders([]);
+    }
+  };
+
+  const fetchPaymentQrs = async () => {
+    try {
+      const res = await axios.get('/api/user/payment-qrs');
+      setPaymentQrs(res.data);
+    } catch {
+      setPaymentQrs(null);
+    }
+  };
+
+  const handleCreatePaymentOrder = async (channel: 'wechat' | 'alipay') => {
+    if (!billingStatus?.billing_enabled) {
+      await confirm('暂未开启', '当前未开启收费，无法创建支付订单');
+      return;
+    }
+    setCreatingOrder(true);
+    try {
+      const months = Number(purchaseMonths || 1);
+      const res = await axios.post('/api/user/payment-orders', { channel, plan: 'pro', months });
+      const order = res.data?.order;
+      const instructions = res.data?.instructions || '';
+      await confirm('订单已创建', `${instructions}${order?.status ? `\n\n状态：${order.status}` : ''}\n\n收款码已在本页显示`);
+      await fetchBillingStatus();
+      await fetchPaymentOrders();
+      await fetchPaymentQrs();
+    } catch (error: any) {
+      await confirm('创建失败', error.response?.data?.detail || error.message || '创建失败');
+    } finally {
+      setCreatingOrder(false);
+    }
+  };
+
+  const pendingOrder = paymentOrders.find((o) => o.status === 'pending') || null;
+
+  const handleSavePaymentNote = async () => {
+    if (!pendingOrder) {
+      await confirm('没有待审核订单', '请先创建支付订单后再提交备注');
+      return;
+    }
+    const note = (paymentNote || '').trim();
+    if (!note) {
+      await confirm('备注为空', '请输入付款备注（例如：已付款/转账时间/手机号尾号等）');
+      return;
+    }
+    setSavingPaymentNote(true);
+    try {
+      await axios.patch(`/api/user/payment-orders/${pendingOrder.order_no}/note`, { note });
+      await confirm('已提交', '备注已提交，等待管理员审核');
+      setPaymentNote('');
+      await fetchPaymentOrders();
+    } catch (error: any) {
+      await confirm('提交失败', error.response?.data?.detail || error.message || '提交失败');
+    } finally {
+      setSavingPaymentNote(false);
     }
   };
 
@@ -480,6 +592,127 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
               <div className="mt-2 text-xs text-gray-500 bg-gray-800/50 px-3 py-2 rounded border border-gray-700">
                 <p className="mb-1">⚠️ 邮件提醒未开启</p>
                 <p className="text-gray-600">需要后端配置SMTP服务（见文档）</p>
+              </div>
+            )}
+          </div>
+
+          <div className="pt-3 border-t border-jojo-gold/30">
+            <div className="mb-3">
+              <p className="font-medium text-jojo-gold mb-1">💳 会员与付费</p>
+              <p className="text-xs text-gray-400 mb-3">
+                {billingStatus?.billing_enabled ? '收费已开启，可通过微信/支付宝创建订单' : '当前未开启收费（保持免费使用）'}
+              </p>
+
+              <div className="mb-2 flex items-center gap-2 text-xs text-gray-300">
+                <span>购买月数</span>
+                <select
+                  value={purchaseMonths}
+                  onChange={(e) => setPurchaseMonths(Number(e.target.value))}
+                  className="px-2 py-1 rounded bg-gray-900 border border-gray-700 text-white"
+                  disabled={creatingOrder || !billingStatus?.billing_enabled}
+                >
+                  <option value={1}>1</option>
+                  <option value={3}>3</option>
+                  <option value={6}>6</option>
+                  <option value={12}>12</option>
+                </select>
+                <span>月</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <button
+                  onClick={() => handleCreatePaymentOrder('wechat')}
+                  className="w-full px-4 py-2 bg-jojo-purple/50 hover:bg-jojo-purple border-2 border-jojo-gold/50 hover:border-jojo-gold rounded-lg text-jojo-gold font-semibold text-sm transition-all shadow-lg disabled:opacity-50"
+                  disabled={creatingOrder || !billingStatus?.billing_enabled}
+                >
+                  微信支付开通
+                </button>
+                <button
+                  onClick={() => handleCreatePaymentOrder('alipay')}
+                  className="w-full px-4 py-2 bg-jojo-purple/50 hover:bg-jojo-purple border-2 border-jojo-gold/50 hover:border-jojo-gold rounded-lg text-jojo-gold font-semibold text-sm transition-all shadow-lg disabled:opacity-50"
+                  disabled={creatingOrder || !billingStatus?.billing_enabled}
+                >
+                  支付宝开通
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <div className="bg-gray-900/50 px-3 py-2 rounded border border-gray-800">
+                <div className="text-xs text-gray-400 mb-1">微信收款码</div>
+                {paymentQrs?.wechat_pay_qr_url ? (
+                  <img src={paymentQrs.wechat_pay_qr_url} alt="wechat-qr" className="w-32 h-32 object-contain bg-gray-950 rounded" />
+                ) : (
+                  <div className="w-32 h-32 flex items-center justify-center text-xs text-gray-500 bg-gray-950 rounded">未配置</div>
+                )}
+              </div>
+              <div className="bg-gray-900/50 px-3 py-2 rounded border border-gray-800">
+                <div className="text-xs text-gray-400 mb-1">支付宝收款码</div>
+                {paymentQrs?.alipay_pay_qr_url ? (
+                  <img src={paymentQrs.alipay_pay_qr_url} alt="alipay-qr" className="w-32 h-32 object-contain bg-gray-950 rounded" />
+                ) : (
+                  <div className="w-32 h-32 flex items-center justify-center text-xs text-gray-500 bg-gray-950 rounded">未配置</div>
+                )}
+              </div>
+            </div>
+
+            {paymentQrs?.receiver_note ? (
+              <div className="mt-2 text-xs text-gray-400 whitespace-pre-wrap bg-gray-800/50 px-3 py-2 rounded border border-gray-700">
+                {paymentQrs.receiver_note}
+              </div>
+            ) : null}
+
+            {pendingOrder ? (
+              <div className="mt-3 bg-gray-900/50 px-3 py-2 rounded border border-gray-800">
+                <div className="text-xs text-gray-400 mb-1">待审核订单</div>
+                <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-300">
+                  <span className="font-mono">#{pendingOrder.order_no.slice(0, 12)}</span>
+                  <span>{pendingOrder.channel === 'wechat' ? '微信' : '支付宝'}</span>
+                  <span>¥{(Number(pendingOrder.amount_cents || 0) / 100).toFixed(2)}</span>
+                  <span>{pendingOrder.plan} · {pendingOrder.months}月</span>
+                </div>
+                <div className="mt-2 grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2">
+                  <input
+                    value={paymentNote}
+                    onChange={(e) => setPaymentNote(e.target.value)}
+                    placeholder="提交付款备注（转账附言/时间/手机号尾号等）"
+                    className="w-full px-3 py-2 rounded bg-gray-950 border border-gray-700 text-white text-xs"
+                    disabled={savingPaymentNote}
+                  />
+                  <button
+                    onClick={handleSavePaymentNote}
+                    className="px-3 py-2 rounded bg-jojo-purple/50 hover:bg-jojo-purple border-2 border-jojo-gold/50 hover:border-jojo-gold text-jojo-gold font-semibold text-xs transition-all shadow-lg disabled:opacity-50"
+                    disabled={savingPaymentNote}
+                  >
+                    {savingPaymentNote ? '提交中…' : '提交备注'}
+                  </button>
+                </div>
+                {pendingOrder.note ? <div className="mt-2 text-xs text-gray-400">已提交：{pendingOrder.note}</div> : null}
+              </div>
+            ) : null}
+
+            <div className="text-xs text-gray-300 bg-gray-800/50 px-3 py-2 rounded border border-gray-700">
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                <span>套餐：{billingStatus?.plan || '-'}</span>
+                <span>到期：{billingStatus?.paid_until || '-'}</span>
+                <span>状态：{billingStatus?.is_paid ? '已开通' : '未开通'}</span>
+              </div>
+            </div>
+
+            {paymentOrders.length > 0 && (
+              <div className="mt-3 text-xs text-gray-400">
+                <div className="mb-1">最近订单</div>
+                <div className="space-y-1">
+                  {paymentOrders.slice(0, 3).map((o) => (
+                    <div key={o.order_no} className="flex flex-wrap gap-x-3 gap-y-1 bg-gray-900/50 px-3 py-2 rounded border border-gray-800">
+                      <span className="text-gray-300">#{o.order_no.slice(0, 8)}</span>
+                      <span>{o.channel === 'wechat' ? '微信' : '支付宝'}</span>
+                      <span>¥{(Number(o.amount_cents || 0) / 100).toFixed(2)}</span>
+                      <span>{o.status}</span>
+                      <span>{o.created_at ? new Date(o.created_at).toLocaleString() : '-'}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>

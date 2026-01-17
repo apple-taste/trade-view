@@ -7,6 +7,7 @@ import Login from './pages/Login';
 import AdminLogin from './pages/AdminLogin';
 import AdminDashboard from './pages/AdminDashboard';
 import Dashboard from './pages/Dashboard';
+import Billing from './pages/Billing';
 import PrivateRoute from './components/PrivateRoute';
 import AdminPrivateRoute from './components/AdminPrivateRoute';
 
@@ -24,6 +25,14 @@ function App() {
             >
               <Routes>
                 <Route path="/login" element={<Login />} />
+                <Route
+                  path="/billing"
+                  element={
+                    <PrivateRoute>
+                      <Billing />
+                    </PrivateRoute>
+                  }
+                />
                 <Route path="/admin/login" element={<AdminLogin />} />
                 <Route
                   path="/admin/*"

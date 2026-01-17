@@ -31,6 +31,47 @@ type PaginatedUsers = {
   total_pages: number;
 };
 
+type PaymentOrder = {
+  order_no: string;
+  user_id: number;
+  channel: string;
+  amount_cents: number;
+  currency: string;
+  plan: string;
+  months: number;
+  status: string;
+  note?: string | null;
+  approved_by_admin?: string | null;
+  approved_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+type PaginatedPaymentOrders = {
+  items: PaymentOrder[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+};
+
+type PaymentQrs = {
+  wechat_pay_qr_url?: string | null;
+  alipay_pay_qr_url?: string | null;
+  receiver_note?: string | null;
+};
+
+type BillingPlanPriceItem = {
+  plan: string;
+  unit_price_cents: number;
+  currency: string;
+  updated_at?: string | null;
+};
+
+type BillingPricesResponse = {
+  items: BillingPlanPriceItem[];
+};
+
 function getAdminHeaders() {
   const token = localStorage.getItem('adminToken');
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -48,11 +89,26 @@ export default function AdminDashboard() {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [loadingStats, setLoadingStats] = useState(false);
 
+  const [billingPrices, setBillingPrices] = useState<BillingPlanPriceItem[] | null>(null);
+  const [loadingBillingPrices, setLoadingBillingPrices] = useState(false);
+  const [billingProPriceYuan, setBillingProPriceYuan] = useState('');
+  const [savingBillingPrice, setSavingBillingPrice] = useState(false);
+
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize] = useState(20);
   const [users, setUsers] = useState<PaginatedUsers | null>(null);
   const [loadingUsers, setLoadingUsers] = useState(false);
+
+  const [orderQuery, setOrderQuery] = useState('');
+  const [orderPage, setOrderPage] = useState(1);
+  const [orders, setOrders] = useState<PaginatedPaymentOrders | null>(null);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+
+  const [paymentQrs, setPaymentQrs] = useState<PaymentQrs | null>(null);
+  const [uploadingQr, setUploadingQr] = useState<'wechat' | 'alipay' | null>(null);
+  const [wechatQrFile, setWechatQrFile] = useState<File | null>(null);
+  const [alipayQrFile, setAlipayQrFile] = useState<File | null>(null);
 
   const [editing, setEditing] = useState<AdminUser | null>(null);
   const [savingUser, setSavingUser] = useState(false);
@@ -96,6 +152,56 @@ export default function AdminDashboard() {
     }
   }, [logout, page, pageSize, query]);
 
+  const fetchOrders = useCallback(async () => {
+    setLoadingOrders(true);
+    try {
+      const res = await axios.get('/api/admin/payment-orders', {
+        params: { query: orderQuery || undefined, page: orderPage, page_size: pageSize },
+        headers: getAdminHeaders(),
+      });
+      setOrders(res.data);
+    } catch (err: any) {
+      const status = err.response?.status;
+      if (status === 401 || status === 403) {
+        logout();
+      }
+    } finally {
+      setLoadingOrders(false);
+    }
+  }, [logout, orderPage, orderQuery, pageSize]);
+
+  const fetchPaymentQrs = useCallback(async () => {
+    try {
+      const res = await axios.get('/api/admin/payment-qrs', { headers: getAdminHeaders() });
+      setPaymentQrs(res.data);
+    } catch {
+      setPaymentQrs(null);
+    }
+  }, []);
+
+  const fetchBillingPrices = useCallback(async () => {
+    setLoadingBillingPrices(true);
+    try {
+      const res = await axios.get('/api/admin/billing-prices', { headers: getAdminHeaders() });
+      const data = res.data as BillingPricesResponse;
+      const items = Array.isArray(data?.items) ? data.items : [];
+      setBillingPrices(items);
+      const pro = items.find((i) => String(i.plan).toLowerCase() === 'pro');
+      if (pro && Number.isFinite(pro.unit_price_cents)) {
+        setBillingProPriceYuan((Number(pro.unit_price_cents) / 100).toFixed(2));
+      }
+    } catch (err: any) {
+      const status = err.response?.status;
+      if (status === 401 || status === 403) {
+        logout();
+        return;
+      }
+      setBillingPrices(null);
+    } finally {
+      setLoadingBillingPrices(false);
+    }
+  }, [logout]);
+
   useEffect(() => {
     if (!localStorage.getItem('adminToken')) {
       navigate('/admin/login');
@@ -103,7 +209,10 @@ export default function AdminDashboard() {
     }
     fetchStats();
     fetchUsers();
-  }, [fetchStats, fetchUsers, navigate]);
+    fetchOrders();
+    fetchPaymentQrs();
+    fetchBillingPrices();
+  }, [fetchBillingPrices, fetchOrders, fetchPaymentQrs, fetchStats, fetchUsers, navigate]);
 
   const cards = useMemo(() => {
     if (!stats) return [];
@@ -132,11 +241,81 @@ export default function AdminDashboard() {
       setEditing(updated);
       await fetchStats();
       await fetchUsers();
+      await fetchOrders();
       setEditing(null);
     } catch (err: any) {
       setEditError(err.response?.data?.detail || '保存失败');
     } finally {
       setSavingUser(false);
+    }
+  };
+
+  const handleApproveOrder = async (orderNo: string) => {
+    try {
+      await axios.post(`/api/admin/payment-orders/${orderNo}/approve`, null, { headers: getAdminHeaders() });
+      await fetchStats();
+      await fetchUsers();
+      await fetchOrders();
+    } catch (err: any) {
+      const msg = err.response?.data?.detail || '操作失败';
+      alert(msg);
+    }
+  };
+
+  const handleCancelOrder = async (orderNo: string) => {
+    try {
+      await axios.post(`/api/admin/payment-orders/${orderNo}/cancel`, null, { headers: getAdminHeaders() });
+      await fetchOrders();
+    } catch (err: any) {
+      const msg = err.response?.data?.detail || '操作失败';
+      alert(msg);
+    }
+  };
+
+  const handleUploadQr = async (channel: 'wechat' | 'alipay') => {
+    const f = channel === 'wechat' ? wechatQrFile : alipayQrFile;
+    if (!f) {
+      alert('请选择图片文件');
+      return;
+    }
+    setUploadingQr(channel);
+    try {
+      const form = new FormData();
+      form.append('file', f);
+      await axios.post(`/api/admin/payment-qrs/${channel}`, form, {
+        headers: { ...getAdminHeaders(), 'Content-Type': 'multipart/form-data' },
+      });
+      await fetchPaymentQrs();
+      alert('上传成功');
+    } catch (err: any) {
+      alert(err.response?.data?.detail || '上传失败');
+    } finally {
+      setUploadingQr(null);
+    }
+  };
+
+  const handleSaveBillingPrice = async () => {
+    const raw = billingProPriceYuan.trim();
+    const yuan = Number(raw);
+    if (!Number.isFinite(yuan) || yuan <= 0) {
+      alert('请输入正确的金额（元）');
+      return;
+    }
+    const unit_price_cents = Math.round(yuan * 100);
+    setSavingBillingPrice(true);
+    try {
+      await axios.put(
+        '/api/admin/billing-prices/pro',
+        { unit_price_cents, currency: 'CNY' },
+        { headers: getAdminHeaders() },
+      );
+      await fetchBillingPrices();
+      alert('保存成功');
+    } catch (err: any) {
+      const msg = err.response?.data?.detail || '保存失败';
+      alert(msg);
+    } finally {
+      setSavingBillingPrice(false);
     }
   };
 
@@ -153,9 +332,12 @@ export default function AdminDashboard() {
               onClick={() => {
                 fetchStats();
                 fetchUsers();
+                fetchOrders();
+                fetchPaymentQrs();
+                fetchBillingPrices();
               }}
               className="jojo-button flex items-center gap-1 text-xs px-2 py-1"
-              disabled={loadingStats || loadingUsers}
+              disabled={loadingStats || loadingUsers || loadingOrders || loadingBillingPrices}
             >
               <RefreshCcw size={14} />
               <span>刷新</span>
@@ -174,6 +356,95 @@ export default function AdminDashboard() {
               <div className="text-xl font-bold">{loadingStats ? '…' : c.value}</div>
             </div>
           ))}
+        </div>
+
+        <div className="jojo-card p-4">
+          <div className="jojo-title text-base mb-3">会员价格</div>
+          <div className="text-xs text-gray-400 mb-2">
+            当前仅配置 pro 月费（未配置时将使用环境变量/默认值）
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-[220px_1fr_auto] gap-2 items-end">
+            <div>
+              <div className="text-xs text-gray-400 mb-1">套餐</div>
+              <div className="px-3 py-2 rounded bg-gray-900 border border-gray-800 text-sm">pro</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-400 mb-1">月费（元）</div>
+              <input
+                value={billingProPriceYuan}
+                onChange={(e) => setBillingProPriceYuan(e.target.value)}
+                className="w-full px-3 py-2 rounded bg-gray-900 border border-gray-700 text-white"
+                placeholder="例如：99.00"
+                inputMode="decimal"
+                disabled={loadingBillingPrices || savingBillingPrice}
+              />
+              <div className="mt-1 text-xs text-gray-500">
+                {loadingBillingPrices
+                  ? '加载中…'
+                  : billingPrices?.some((i) => String(i.plan).toLowerCase() === 'pro')
+                    ? '已配置'
+                    : '未配置'}
+              </div>
+            </div>
+            <button
+              className="jojo-button px-3 py-2 text-xs disabled:opacity-50"
+              disabled={savingBillingPrice || loadingBillingPrices}
+              onClick={handleSaveBillingPrice}
+            >
+              {savingBillingPrice ? '保存中…' : '保存'}
+            </button>
+          </div>
+        </div>
+
+        <div className="jojo-card p-4">
+          <div className="jojo-title text-base mb-3">收款码管理</div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <div className="text-xs text-gray-400">微信收款码</div>
+              {paymentQrs?.wechat_pay_qr_url ? (
+                <img src={paymentQrs.wechat_pay_qr_url} alt="wechat-qr" className="w-40 h-40 object-contain bg-gray-900 rounded" />
+              ) : (
+                <div className="w-40 h-40 flex items-center justify-center text-xs text-gray-500 bg-gray-900 rounded">未配置</div>
+              )}
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => setWechatQrFile(e.target.files?.[0] ?? null)}
+                className="block w-full text-xs text-gray-300"
+              />
+              <button
+                className="jojo-button px-3 py-1 text-xs disabled:opacity-50"
+                disabled={uploadingQr === 'wechat'}
+                onClick={() => handleUploadQr('wechat')}
+              >
+                {uploadingQr === 'wechat' ? '上传中…' : '上传微信收款码'}
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-xs text-gray-400">支付宝收款码</div>
+              {paymentQrs?.alipay_pay_qr_url ? (
+                <img src={paymentQrs.alipay_pay_qr_url} alt="alipay-qr" className="w-40 h-40 object-contain bg-gray-900 rounded" />
+              ) : (
+                <div className="w-40 h-40 flex items-center justify-center text-xs text-gray-500 bg-gray-900 rounded">未配置</div>
+              )}
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => setAlipayQrFile(e.target.files?.[0] ?? null)}
+                className="block w-full text-xs text-gray-300"
+              />
+              <button
+                className="jojo-button px-3 py-1 text-xs disabled:opacity-50"
+                disabled={uploadingQr === 'alipay'}
+                onClick={() => handleUploadQr('alipay')}
+              >
+                {uploadingQr === 'alipay' ? '上传中…' : '上传支付宝收款码'}
+              </button>
+            </div>
+          </div>
+          {paymentQrs?.receiver_note ? <div className="mt-3 text-xs text-gray-400 whitespace-pre-wrap">{paymentQrs.receiver_note}</div> : null}
         </div>
 
         <div className="jojo-card p-4">
@@ -270,6 +541,117 @@ export default function AdminDashboard() {
             </table>
           </div>
         </div>
+
+        <div className="jojo-card p-4">
+          <div className="flex flex-col md:flex-row md:items-center gap-2 justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  value={orderQuery}
+                  onChange={(e) => {
+                    setOrderQuery(e.target.value);
+                    setOrderPage(1);
+                  }}
+                  placeholder="搜索订单号/用户ID"
+                  className="pl-8 pr-3 py-2 rounded bg-gray-900 border border-gray-700 text-white w-64"
+                />
+              </div>
+              <div className="text-xs text-gray-400">{orders ? `共 ${orders.total} 单` : ''}</div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                className="jojo-button px-3 py-1 text-xs disabled:opacity-50"
+                disabled={!orders || orders.page <= 1 || loadingOrders}
+                onClick={() => setOrderPage((p) => Math.max(1, p - 1))}
+              >
+                上一页
+              </button>
+              <div className="text-xs text-gray-300">{orders ? `${orders.page} / ${orders.total_pages}` : '…'}</div>
+              <button
+                className="jojo-button px-3 py-1 text-xs disabled:opacity-50"
+                disabled={!orders || orders.page >= orders.total_pages || loadingOrders}
+                onClick={() => setOrderPage((p) => (orders ? Math.min(orders.total_pages, p + 1) : p))}
+              >
+                下一页
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-400 border-b border-gray-800">
+                  <th className="py-2 pr-3">订单号</th>
+                  <th className="py-2 pr-3">用户ID</th>
+                  <th className="py-2 pr-3">金额</th>
+                  <th className="py-2 pr-3">渠道</th>
+                  <th className="py-2 pr-3">套餐</th>
+                  <th className="py-2 pr-3">备注</th>
+                  <th className="py-2 pr-3">状态</th>
+                  <th className="py-2 pr-3">创建时间</th>
+                  <th className="py-2 pr-3">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loadingOrders && (
+                  <tr>
+                    <td className="py-3 text-gray-400" colSpan={9}>
+                      加载中…
+                    </td>
+                  </tr>
+                )}
+                {!loadingOrders && orders?.items?.length === 0 && (
+                  <tr>
+                    <td className="py-3 text-gray-400" colSpan={9}>
+                      暂无数据
+                    </td>
+                  </tr>
+                )}
+                {!loadingOrders &&
+                  orders?.items?.map((o) => (
+                    <tr key={o.order_no} className="border-b border-gray-900">
+                      <td className="py-2 pr-3">
+                        <div className="font-mono text-xs">{o.order_no}</div>
+                      </td>
+                      <td className="py-2 pr-3">{o.user_id}</td>
+                      <td className="py-2 pr-3">¥{(Number(o.amount_cents || 0) / 100).toFixed(2)}</td>
+                      <td className="py-2 pr-3">{o.channel === 'wechat' ? '微信' : '支付宝'}</td>
+                      <td className="py-2 pr-3">
+                        {o.plan} · {o.months}月
+                      </td>
+                      <td className="py-2 pr-3">
+                        <div className="max-w-xs truncate text-gray-300" title={o.note || ''}>
+                          {o.note || '-'}
+                        </div>
+                      </td>
+                      <td className="py-2 pr-3">{o.status}</td>
+                      <td className="py-2 pr-3">{formatDateTime(o.created_at || undefined)}</td>
+                      <td className="py-2 pr-3">
+                        <div className="flex items-center gap-2">
+                          <button
+                            className="jojo-button px-2 py-1 text-xs disabled:opacity-50"
+                            disabled={o.status === 'approved' || loadingOrders}
+                            onClick={() => handleApproveOrder(o.order_no)}
+                          >
+                            通过
+                          </button>
+                          <button
+                            className="jojo-button-danger px-2 py-1 text-xs disabled:opacity-50"
+                            disabled={o.status === 'approved' || o.status === 'canceled' || loadingOrders}
+                            onClick={() => handleCancelOrder(o.order_no)}
+                          >
+                            取消
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
 
       {editing && (
@@ -353,4 +735,3 @@ export default function AdminDashboard() {
     </div>
   );
 }
-

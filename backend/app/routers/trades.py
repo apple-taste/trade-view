@@ -7,7 +7,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 from app.database import get_db, Trade, CapitalHistory
-from app.middleware.auth import get_current_user
+from app.middleware.auth import get_current_user, billing_enabled, user_has_active_subscription
 from app.models import TradeCreate, TradeUpdate, TradeResponse, PaginatedTradeResponse
 from app.database import User
 from app.routers.user import recalculate_capital_history, recalculate_strategy_capital_history, _get_stock_strategy
@@ -239,6 +239,8 @@ async def create_trade(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    if billing_enabled() and not user_has_active_subscription(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="非会员无法新增交易记录，请先开通会员")
     # 处理open_time：如果有时区信息，转换为naive UTC时间
     if trade_data.open_time:
         open_time = trade_data.open_time
