@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, update
+from sqlalchemy import select, func, update, and_, or_
 from datetime import datetime, date, timezone, timedelta
 import asyncio
 import time
@@ -695,7 +695,8 @@ async def get_capital_history(
 ):
     strategy = await _get_forex_strategy(db, current_user, strategy_id)
     account = await _get_or_create_account(db, current_user.id)
-    anchor_date = account.initial_date or datetime.utcnow().date()
+    baseline = float(strategy.initial_capital) if strategy.initial_capital is not None else float(account.initial_balance)
+    anchor_date = strategy.initial_date or account.initial_date or datetime.utcnow().date()
     if start_date is not None:
         anchor_date = max(anchor_date, start_date)
 
@@ -705,22 +706,45 @@ async def get_capital_history(
             ForexTrade.user_id == current_user.id,
             ForexTrade.strategy_id == strategy.id,
             ForexTrade.is_deleted == False,
-            ForexTrade.status == "closed",
-            ForexTrade.close_time.isnot(None),
+            or_(
+                func.date(ForexTrade.open_time) >= anchor_date,
+                and_(
+                    ForexTrade.status == "closed",
+                    ForexTrade.close_time.isnot(None),
+                    func.date(ForexTrade.close_time) >= anchor_date,
+                ),
+            ),
         )
-        .order_by(ForexTrade.close_time.asc())
+        .order_by(ForexTrade.open_time.asc())
     )
-    closed = result.scalars().all()
+    trades = result.scalars().all()
+
+    events: list[tuple[datetime, str, ForexTrade]] = []
+    for t in trades:
+        if t.open_time is not None and t.open_time.date() >= anchor_date:
+            events.append((t.open_time, "open", t))
+        if t.status == "closed" and t.close_time is not None and t.close_time.date() >= anchor_date:
+            events.append((t.close_time, "close", t))
+    events.sort(key=lambda x: x[0])
 
     points_by_date: dict[date, float] = {}
-    running = float(account.initial_balance)
+    running = baseline
     points_by_date[anchor_date] = running
 
-    for t in closed:
-        d = t.close_time.date() if t.close_time else anchor_date
+    for t_time, t_type, t in events:
+        beijing_dt = t_time + timedelta(hours=8)
+        d = beijing_dt.date()
+        if end_date is not None and d > end_date:
+            break
         if d < anchor_date:
             continue
-        running += float(t.profit or 0)
+        if t_type == "open":
+            running -= float(t.commission or 0)
+        else:
+            if t.profit is None and t.close_price is not None:
+                gross = _calc_profit(t.symbol, t.side, t.lots, t.open_price, t.close_price)
+                t.profit = float(gross) - float(t.commission or 0) - float(t.swap or 0)
+            running += float(t.profit or 0) + float(t.commission or 0)
         points_by_date[d] = running
 
     dates = sorted(points_by_date.keys())

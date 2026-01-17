@@ -169,9 +169,8 @@ export function TradeProvider({ children }: { children: ReactNode }) {
       } else {
         localStorage.setItem('currentStockStrategyId', String(strategyId));
       }
-      refreshAll();
     },
-    [refreshAll]
+    []
   );
 
   const setCurrentForexStrategyId = useCallback(
@@ -182,9 +181,8 @@ export function TradeProvider({ children }: { children: ReactNode }) {
       } else {
         localStorage.setItem('currentForexStrategyId', String(strategyId));
       }
-      refreshAll();
     },
-    [refreshAll]
+    []
   );
 
   const createStrategy = useCallback(
@@ -193,13 +191,18 @@ export function TradeProvider({ children }: { children: ReactNode }) {
       if (!trimmed) return null;
       const res = await axios.post('/api/user/strategies', { name: trimmed }, { params: { market: 'stock' } });
       const created = res.data as Strategy;
-      await refreshStrategies();
+      if (created?.id != null) {
+        setStrategies((prev) => {
+          const next = prev.some((s) => s.id === created.id) ? prev : [...prev, created];
+          return next.filter((s) => s?.name !== '默认策略');
+        });
+      }
       if (created?.id != null) {
         setCurrentStrategyId(created.id);
       }
       return created;
     },
-    [refreshStrategies, setCurrentStrategyId]
+    [setCurrentStrategyId]
   );
 
   const createForexStrategy = useCallback(
@@ -208,13 +211,15 @@ export function TradeProvider({ children }: { children: ReactNode }) {
       if (!trimmed) return null;
       const res = await axios.post('/api/user/strategies', { name: trimmed }, { params: { market: 'forex' } });
       const created = res.data as Strategy;
-      await refreshForexStrategies();
+      if (created?.id != null) {
+        setForexStrategies((prev) => (prev.some((s) => s.id === created.id) ? prev : [...prev, created]));
+      }
       if (created?.id != null) {
         setCurrentForexStrategyId(created.id);
       }
       return created;
     },
-    [refreshForexStrategies, setCurrentForexStrategyId]
+    [setCurrentForexStrategyId]
   );
 
   const deleteStrategy = useCallback(
@@ -231,9 +236,8 @@ export function TradeProvider({ children }: { children: ReactNode }) {
         }
         return nextId;
       });
-      refreshAll();
     },
-    [refreshAll, refreshStrategies, strategies]
+    [refreshStrategies, strategies]
   );
 
   const deleteForexStrategy = useCallback(
@@ -250,9 +254,8 @@ export function TradeProvider({ children }: { children: ReactNode }) {
         }
         return nextId;
       });
-      refreshAll();
     },
-    [forexStrategies, refreshAll, refreshForexStrategies]
+    [forexStrategies, refreshForexStrategies]
   );
 
   const deleteAllStrategies = useCallback(async () => {
@@ -260,16 +263,14 @@ export function TradeProvider({ children }: { children: ReactNode }) {
     await refreshStrategies();
     setCurrentStrategyIdState(null);
     localStorage.removeItem('currentStockStrategyId');
-    refreshAll();
-  }, [refreshAll, refreshStrategies]);
+  }, [refreshStrategies]);
 
   const deleteAllForexStrategies = useCallback(async () => {
     await axios.delete('/api/user/strategies', { params: { market: 'forex' } });
     await refreshForexStrategies();
     setCurrentForexStrategyIdState(null);
     localStorage.removeItem('currentForexStrategyId');
-    refreshAll();
-  }, [refreshAll, refreshForexStrategies]);
+  }, [refreshForexStrategies]);
 
   useEffect(() => {
     if (loading) return;

@@ -101,11 +101,14 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
     } else {
       fetchCapitalData(getStartDate(period));
     }
+  }, [_userPanelRefreshKey, chartMode, period, effectiveStrategyId, showChart]);
+
+  useEffect(() => {
     fetchUserProfile();
     fetchBillingStatus();
     fetchPaymentOrders();
     fetchPaymentQrs();
-  }, [_userPanelRefreshKey, chartMode, period, effectiveStrategyId, showChart]); // 当refresh key变化时刷新
+  }, [user?.id]);
 
   const fetchUserProfile = async () => {
     try {

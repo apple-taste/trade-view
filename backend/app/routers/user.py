@@ -932,17 +932,21 @@ async def recalculate_strategy_capital_history(db: AsyncSession, user_id: int, s
         total_assets = available_funds + position_value
         capital_records[trade_date] = (available_funds, position_value, total_assets)
 
-    for trade_date in sorted(capital_records.keys()):
-        available, position_val, total = capital_records[trade_date]
-        result = await db.execute(
-            select(StrategyCapitalHistory).where(
-                StrategyCapitalHistory.user_id == user_id,
-                StrategyCapitalHistory.strategy_id == strategy_id,
-                StrategyCapitalHistory.date == trade_date
-            )
+    existing_result = await db.execute(
+        select(StrategyCapitalHistory).where(
+            StrategyCapitalHistory.user_id == user_id,
+            StrategyCapitalHistory.strategy_id == strategy_id,
+            StrategyCapitalHistory.date >= start_date,
         )
-        existing = result.scalar_one_or_none()
-        if existing:
+    )
+    existing_records = existing_result.scalars().all()
+    existing_by_date: dict[date, StrategyCapitalHistory] = {r.date: r for r in existing_records}
+
+    keep_dates = set(capital_records.keys())
+
+    for trade_date, (available, position_val, total) in capital_records.items():
+        existing = existing_by_date.get(trade_date)
+        if existing is not None:
             existing.capital = total
             existing.available_funds = available
             existing.position_value = position_val
@@ -954,9 +958,13 @@ async def recalculate_strategy_capital_history(db: AsyncSession, user_id: int, s
                     date=trade_date,
                     capital=total,
                     available_funds=available,
-                    position_value=position_val
+                    position_value=position_val,
                 )
             )
+
+    for record in existing_records:
+        if record.date not in keep_dates:
+            await db.delete(record)
     await db.commit()
 
 async def recalculate_capital_history(db: AsyncSession, user_id: int, start_date: date):
@@ -1156,29 +1164,37 @@ async def recalculate_capital_history(db: AsyncSession, user_id: int, start_date
         capital_records[trade_date] = (available_funds, position_value, total_assets)
     
     # 更新或创建资金历史记录（同花顺模式：记录可用资金、持仓市值、总资产）
-    for trade_date in sorted(capital_records.keys()):
-        available, position_val, total = capital_records[trade_date]
-        result = await db.execute(
-            select(CapitalHistory).where(
-                CapitalHistory.user_id == user_id,
-                CapitalHistory.date == trade_date
-            )
+    existing_result = await db.execute(
+        select(CapitalHistory).where(
+            CapitalHistory.user_id == user_id,
+            CapitalHistory.date >= start_date,
         )
-        existing = result.scalar_one_or_none()
-        
-        if existing:
+    )
+    existing_records = existing_result.scalars().all()
+    existing_by_date: dict[date, CapitalHistory] = {r.date: r for r in existing_records}
+
+    keep_dates = set(capital_records.keys())
+
+    for trade_date, (available, position_val, total) in capital_records.items():
+        existing = existing_by_date.get(trade_date)
+        if existing is not None:
             existing.capital = total
             existing.available_funds = available
             existing.position_value = position_val
         else:
-            new_history = CapitalHistory(
-                user_id=user_id,
-                date=trade_date,
-                capital=total,
-                available_funds=available,
-                position_value=position_val
+            db.add(
+                CapitalHistory(
+                    user_id=user_id,
+                    date=trade_date,
+                    capital=total,
+                    available_funds=available,
+                    position_value=position_val,
+                )
             )
-            db.add(new_history)
+
+    for record in existing_records:
+        if record.date not in keep_dates:
+            await db.delete(record)
     
     await db.commit()
 
@@ -1437,11 +1453,9 @@ async def get_all_strategy_capital_histories(
                     ForexTrade.user_id == current_user.id,
                     ForexTrade.strategy_id == s.id,
                     ForexTrade.is_deleted == False,
-                    ForexTrade.status == "closed",
-                    ForexTrade.close_time.isnot(None),
-                ).order_by(ForexTrade.close_time.asc())
+                ).order_by(ForexTrade.open_time.asc())
             )
-            closed = trades_result.scalars().all()
+            trades = trades_result.scalars().all()
 
             strategy_baseline = float(s.initial_capital) if s.initial_capital is not None else baseline
             strategy_anchor_date = s.initial_date or anchor_date
@@ -1458,16 +1472,24 @@ async def get_all_strategy_capital_histories(
             start_value = strategy_baseline
             points_by_date: dict[date, float] = {effective_start: start_value}
 
-            for t in closed:
-                close_time = t.close_time
-                if close_time is None:
-                    continue
-                beijing_date = (close_time + timedelta(hours=8)).date()
+            events: list[tuple[datetime, str, ForexTrade]] = []
+            for t in trades:
+                if t.open_time is not None:
+                    events.append((t.open_time, "open", t))
+                if t.status == "closed" and t.close_time is not None:
+                    events.append((t.close_time, "close", t))
+            events.sort(key=lambda x: x[0])
+
+            for event_time, event_type, t in events:
+                beijing_date = (event_time + timedelta(hours=8)).date()
                 if beijing_date < strategy_anchor_date:
                     continue
                 if end_date is not None and beijing_date > end_date:
                     break
-                running += float(t.profit or 0)
+                if event_type == "open":
+                    running -= float(t.commission or 0)
+                else:
+                    running += float(t.profit or 0) + float(t.commission or 0)
                 if beijing_date < effective_start:
                     start_value = running
                     points_by_date[effective_start] = start_value

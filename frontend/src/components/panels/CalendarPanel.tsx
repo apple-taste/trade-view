@@ -16,10 +16,11 @@ export default function CalendarPanel({ selectedDate, onDateChange, apiBase = '/
   const [tradeDates, setTradeDates] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const { _calendarRefreshKey, effectiveStrategyId, effectiveForexStrategyId } = useTrade();
+  const selectedStrategyId = apiBase === '/api/forex/trades' ? effectiveForexStrategyId : effectiveStrategyId;
 
   useEffect(() => {
     fetchTradeDates();
-  }, [_calendarRefreshKey, refreshKey]); // 当refresh key变化时刷新
+  }, [_calendarRefreshKey, refreshKey, apiBase, selectedStrategyId]); // 当refresh key变化时刷新
 
   useEffect(() => {
     // 当selectedDate改变时，更新currentMonth
@@ -29,24 +30,11 @@ export default function CalendarPanel({ selectedDate, onDateChange, apiBase = '/
   const fetchTradeDates = async () => {
     setLoading(true);
     try {
-      if (apiBase === '/api/trades' && effectiveStrategyId == null) {
+      if (selectedStrategyId == null) {
         setTradeDates(new Set());
         return;
       }
-      if (apiBase === '/api/forex/trades' && effectiveForexStrategyId == null) {
-        setTradeDates(new Set());
-        return;
-      }
-      const params =
-        apiBase === '/api/trades'
-          ? effectiveStrategyId != null
-            ? { strategy_id: effectiveStrategyId }
-            : undefined
-          : apiBase === '/api/forex/trades'
-            ? effectiveForexStrategyId != null
-              ? { strategy_id: effectiveForexStrategyId }
-              : undefined
-            : undefined;
+      const params = { strategy_id: selectedStrategyId };
       const response = await axios.get(`${apiBase}/dates`, { params });
       setTradeDates(new Set(response.data));
     } catch (error) {

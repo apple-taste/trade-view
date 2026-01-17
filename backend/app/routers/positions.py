@@ -98,33 +98,28 @@ async def get_positions(
     )
     positions = result.scalars().all()
     
-    # 计算持仓天数并获取实时价格
     from app.services.price_monitor import price_monitor
-    
-    # 批量获取价格
-    stock_codes = [pos.stock_code for pos in positions if pos.stock_code]
-    price_data = await price_monitor.batch_fetch_prices(stock_codes)
-    
+
     for position in positions:
         if position.open_time:
             days = (datetime.utcnow() - position.open_time).days
             position.holding_days = days
         
-        # 获取实时价格和来源
-        if position.stock_code and position.stock_code in price_data:
-            price_info = price_data[position.stock_code]
-            position.current_price = price_info.get("price", 0.0)
-            # 将价格来源存储到notes字段的临时位置，或者创建一个新字段
-            # 由于TradeResponse可能没有price_source字段，我们暂时通过扩展TradeResponse来处理
-            if not hasattr(position, 'price_source'):
-                position.price_source = price_info.get("source", "未知")
+        if position.stock_code:
+            cached_price, cached_source = price_monitor.get_current_price(position.stock_code)
+            if cached_price is not None:
+                position.current_price = float(cached_price)
+                position.price_source = cached_source or "缓存"
+            else:
+                position.current_price = position.buy_price
+                position.price_source = "成本价"
     
     # 扩展TradeResponse以包含price_source
     result = []
     for pos in positions:
         pos_dict = pos.__dict__.copy()
-        if pos.stock_code and pos.stock_code in price_data:
-            pos_dict['price_source'] = price_data[pos.stock_code].get("source", "未知")
+        if getattr(pos, "price_source", None):
+            pos_dict["price_source"] = getattr(pos, "price_source", None)
         result.append(TradeResponse(**pos_dict))
     
     return result

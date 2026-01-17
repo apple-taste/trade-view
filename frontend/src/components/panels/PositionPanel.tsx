@@ -142,6 +142,7 @@ export default function PositionPanel() {
   }, [lastDeletedTradeId, setLastDeletedTradeId]);
 
   useEffect(() => {
+    setLoading(true);
     fetchPositions();
     
     // 设置定时刷新价格（每500ms，毫秒级实时性）
@@ -154,7 +155,7 @@ export default function PositionPanel() {
         clearInterval(refreshIntervalRef.current);
       }
     };
-  }, [_positionsRefreshKey]); // 当refresh key变化时刷新
+  }, [_positionsRefreshKey, effectiveStrategyId]); // 当refresh key变化时刷新
 
   const fetchPositions = async () => {
     setIsSyncing(true);
