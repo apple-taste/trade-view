@@ -64,6 +64,12 @@ for key in [
     "ADMIN_USERNAME",
     "ADMIN_PASSWORD",
     "ADMIN_PASSWORD_HASH",
+    "BILLING_ENABLED",
+    "WECHAT_PAY_QR_URL",
+    "ALIPAY_PAY_QR_URL",
+    "PAYMENT_RECEIVER_NOTE",
+    "CORS_ORIGINS",
+    "BILLING_PLAN_PRO_PRICE_CENTS",
 ]:
     val = os.getenv(key, "")
     if val:
