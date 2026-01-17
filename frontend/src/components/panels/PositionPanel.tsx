@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import axios from 'axios';
 import { Bell, BellOff, TrendingUp, TrendingDown, RefreshCw, Info } from 'lucide-react';
 import { useTrade } from '../../contexts/TradeContext';
@@ -426,6 +426,29 @@ export default function PositionPanel() {
     return profit;
   };
 
+  const calculateActualSingleLoss = (position: Position) => {
+    if (!position.stop_loss_price) return null;
+    if (!position.buy_price || !position.shares) return null;
+    return Math.abs(position.buy_price - position.stop_loss_price) * position.shares;
+  };
+
+  const lossStats = useMemo(() => {
+    const losses = positions
+      .map(calculateActualSingleLoss)
+      .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+
+    const sum = losses.reduce((acc, v) => acc + v, 0);
+    const max = losses.length > 0 ? Math.max(...losses) : 0;
+    const avg = losses.length > 0 ? sum / losses.length : 0;
+
+    return {
+      count: losses.length,
+      sum,
+      max,
+      avg,
+    };
+  }, [positions]);
+
   if (loading) {
     return (
       <div className="jojo-card p-6 text-center h-full flex flex-col justify-center">
@@ -462,10 +485,29 @@ export default function PositionPanel() {
           当前无持仓
         </div>
       ) : (
-        <div className="space-y-2 flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-1">
-          {positions.map((position) => {
+        <div className="flex-1 min-h-0 flex flex-col">
+          <div className="mb-2 flex-none border border-jojo-gold rounded p-2 bg-jojo-blue-light text-xs text-gray-300">
+            <div className="flex flex-wrap gap-x-3 gap-y-1">
+              <div>
+                <span className="text-gray-400">已设止损:</span> {lossStats.count}/{positions.length}
+              </div>
+              <div>
+                <span className="text-gray-400">实际单笔损失合计:</span> ¥{lossStats.sum.toFixed(2)}
+              </div>
+              <div>
+                <span className="text-gray-400">平均:</span> ¥{lossStats.avg.toFixed(2)}
+              </div>
+              <div>
+                <span className="text-gray-400">最大:</span> ¥{lossStats.max.toFixed(2)}
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-2 flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-1">
+            {positions.map((position) => {
             const profit = calculateProfit(position);
             const profitPercent = profit ? ((position.current_price! - position.buy_price) / position.buy_price * 100) : null;
+            const actualSingleLoss = calculateActualSingleLoss(position);
 
             return (
               <div key={position.id} className="border border-jojo-gold rounded p-2 bg-jojo-blue-light">
@@ -500,6 +542,10 @@ export default function PositionPanel() {
                     </div>
                     <div>
                       <span className="text-gray-400">市值:</span> {position.current_price ? `¥${(position.current_price * position.shares).toFixed(2)}` : '获取中...'}
+                    </div>
+                    <div className="xl:col-span-2">
+                      <span className="text-gray-400">实际单笔损失:</span>{' '}
+                      {actualSingleLoss != null ? `¥${actualSingleLoss.toFixed(2)}` : '未设置止损'}
                     </div>
                   </div>
 
@@ -596,7 +642,8 @@ export default function PositionPanel() {
                 </div>
               </div>
             );
-          })}
+            })}
+          </div>
         </div>
       )}
       
