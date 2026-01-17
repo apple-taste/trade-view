@@ -78,6 +78,9 @@ def _resolve_payment_qr_urls() -> tuple[str | None, str | None, str | None]:
 
     backend_dir = Path(__file__).resolve().parents[2]
     payment_dir = backend_dir / "static" / "payments"
+    db_dir = (os.getenv("DB_DIR") or "").strip()
+    if db_dir:
+        payment_dir = Path(db_dir) / "payments"
 
     def find_static(channel: str) -> str | None:
         for ext in (".png", ".jpg", ".jpeg", ".webp"):
