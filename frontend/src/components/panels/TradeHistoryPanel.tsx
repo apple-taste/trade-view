@@ -971,6 +971,16 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
               <div className="col-span-2 p-2 bg-green-500/20 border border-green-500/50 rounded text-xs text-green-300">
                 💡 <strong>自动计算手数模式</strong>：已根据单笔风险 {formData.risk_per_trade} 元自动计算手数为 {formData.shares || '计算中...'} 股
                 <br />
+                实际单笔损失 ≈ {(() => {
+                  const shares = parseInt(formData.shares || '0');
+                  const buyPrice = parseFloat(formData.buy_price || '0');
+                  const stopLossPrice = parseFloat(formData.stop_loss_price || '0');
+                  const riskPerShare = buyPrice - stopLossPrice;
+                  if (!Number.isFinite(shares) || shares <= 0) return '0.00';
+                  if (!Number.isFinite(riskPerShare) || riskPerShare <= 0) return '0.00';
+                  return (shares * riskPerShare).toFixed(2);
+                })()} 元
+                <br />
                 <span className="text-gray-400">如需手动设置手数，请直接在手数字段输入，系统将停止自动计算</span>
               </div>
             )}
@@ -1042,7 +1052,16 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
               />
               {formData.risk_per_trade && formData.buy_price && formData.stop_loss_price && (
                 <div className="text-xs text-green-400 mt-1">
-                  💡 手数 = {formData.risk_per_trade} / ({formData.buy_price} - {formData.stop_loss_price}) = {formData.shares || '计算中...'}
+                  💡 手数 = {formData.risk_per_trade} / ({formData.buy_price} - {formData.stop_loss_price}) = {formData.shares || '计算中...'}；
+                  实际单笔损失 ≈ {(() => {
+                    const shares = parseInt(formData.shares || '0');
+                    const buyPrice = parseFloat(formData.buy_price || '0');
+                    const stopLossPrice = parseFloat(formData.stop_loss_price || '0');
+                    const riskPerShare = buyPrice - stopLossPrice;
+                    if (!Number.isFinite(shares) || shares <= 0) return '0.00';
+                    if (!Number.isFinite(riskPerShare) || riskPerShare <= 0) return '0.00';
+                    return (shares * riskPerShare).toFixed(2);
+                  })()} 元
                 </div>
               )}
             </div>
