@@ -1031,7 +1031,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
                 placeholder={formData.risk_per_trade ? "自动计算" : "必填"}
                 required={!formData.risk_per_trade}
                 step={!editingTrade || editingTrade.status === 'open' ? 100 : 1}
-                min={1}
+                min={!editingTrade || editingTrade.status === 'open' ? 100 : 1}
               />
             </div>
             <div>
