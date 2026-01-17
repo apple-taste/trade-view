@@ -20,7 +20,7 @@ const DEFAULT_LAYOUT = {
 };
 
 export default function Dashboard() {
-  const { user, logout } = useAuth();
+  const { user, logout, billingStatus } = useAuth();
   const { alerts, dismissAlert, clearAllAlerts } = useAlerts();
   const { language, setLanguage, t } = useLocale();
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -171,7 +171,20 @@ export default function Dashboard() {
             >
               <RotateCcw size={16} />
             </button>
-            <span className="text-jojo-gold font-bold text-sm hidden md:inline">{t('nav.welcome')}, {user?.username}</span>
+            <div className="hidden md:flex items-center gap-2">
+              {billingStatus?.billing_enabled ? (
+                <span
+                  className={`px-2 py-0.5 rounded text-[11px] font-extrabold border ${
+                    billingStatus.is_paid
+                      ? 'bg-jojo-gold text-gray-900 border-yellow-400'
+                      : 'bg-gray-800 text-gray-200 border-gray-700'
+                  }`}
+                >
+                  {billingStatus.is_paid ? 'PRO' : 'FREE'}
+                </span>
+              ) : null}
+              <span className="text-jojo-gold font-bold text-sm">{t('nav.welcome')}, {user?.username}</span>
+            </div>
             <button
               onClick={logout}
               className="jojo-button-danger flex items-center space-x-1 text-xs px-2 py-1"

@@ -7,7 +7,7 @@ import time
 import aiohttp
 
 from app.database import get_db, User, ForexAccount, ForexTrade, Strategy, AsyncSessionLocal
-from app.middleware.auth import get_current_user
+from app.middleware.auth import get_current_user, billing_enabled, user_has_active_subscription
 from app.routers.user import _get_forex_strategy
 from app.models import (
     ForexAccountResponse,
@@ -520,6 +520,12 @@ async def create_trade(
                 await _recalculate_account(session, user_id, strategy_id_value)
         except Exception:
             pass
+
+    if billing_enabled() and not user_has_active_subscription(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "BILLING_REQUIRED", "message": "非Pro会员无法新增交易记录，请先开通Pro会员"},
+        )
 
     requested_strategy_id = payload.strategy_id if payload.strategy_id is not None else strategy_id
     strategy = await _get_forex_strategy(db, current_user, requested_strategy_id)

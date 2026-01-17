@@ -4,10 +4,12 @@ import { Plus, Edit, Trash2, Calendar, List, Trash, Loader2 } from 'lucide-react
 import { format, addDays, subDays } from 'date-fns';
 import { useTrade } from '../../contexts/TradeContext';
 import { useAlerts } from '../../contexts/AlertContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { logger } from '../../utils/logger';
 import { perfMonitor } from '../../utils/performance';
 import { useJojoModal } from '../JojoModal';
 import JojolandMascot from '../JojolandMascot';
+import { useNavigate } from 'react-router-dom';
 
 // 北京时间工具函数（UTC+8）
 const BEIJING_TIMEZONE_OFFSET = 8 * 60; // 8小时 = 480分钟
@@ -91,6 +93,8 @@ interface StockStatistics {
 
 export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelProps) {
   const { confirm, prompt, Modal } = useJojoModal();
+  const navigate = useNavigate();
+  const { refreshBillingStatus } = useAuth();
   // 缓存交易记录: 日期 -> 交易列表
   const tradesCache = useRef<Record<string, Trade[]>>({});
   const [trades, setTrades] = useState<Trade[]>([]);
@@ -503,7 +507,31 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       console.error('❌ [交易操作] 操作失败:', error);
       // 如果失败，确保表单保持打开状态
       setShowForm(true);
-      const errorMessage = error.response?.data?.detail || error.message || '操作失败';
+      const detail = error.response?.data?.detail;
+      const status = error.response?.status;
+      const billingRequired =
+        status === 403 &&
+        (detail?.code === 'BILLING_REQUIRED' ||
+          (typeof detail === 'string' && detail.includes('BILLING_REQUIRED')));
+      if (billingRequired) {
+        const msg =
+          (typeof detail === 'object' && detail?.message) ||
+          (typeof detail === 'string' ? detail : '') ||
+          '非Pro会员无法新增交易记录，请先开通Pro会员';
+        const ok = await confirm('需要会员', msg);
+        if (ok) {
+          await refreshBillingStatus();
+          setShowForm(false);
+          navigate('/billing?months=1');
+        }
+        return;
+      }
+
+      const errorMessage =
+        (typeof detail === 'object' && detail?.message) ||
+        (typeof detail === 'string' ? detail : '') ||
+        error.message ||
+        '操作失败';
       alert(`❌ 操作失败\n\n${errorMessage}`);
     }
   };
@@ -754,6 +782,19 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
         <div className="flex items-center space-x-1 flex-shrink-0">
           <button
             onClick={async () => {
+              try {
+                const res = await axios.get('/api/user/billing-status');
+                const bs = res.data;
+                if (bs?.billing_enabled && !bs?.is_paid) {
+                  const ok = await confirm('需要会员', '非Pro会员无法新增交易记录，请先开通Pro会员');
+                  if (ok) {
+                    await refreshBillingStatus();
+                    navigate('/billing?months=1');
+                  }
+                  return;
+                }
+              } catch {
+              }
               resetForm();
               setEditingTrade(null);
               setShowForm(true);

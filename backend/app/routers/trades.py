@@ -8,7 +8,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 from app.database import get_db, Trade, CapitalHistory, AsyncSessionLocal
-from app.middleware.auth import get_current_user
+from app.middleware.auth import get_current_user, billing_enabled, user_has_active_subscription
 from app.models import TradeCreate, TradeUpdate, TradeResponse, PaginatedTradeResponse
 from app.database import User
 from app.routers.user import recalculate_capital_history, recalculate_strategy_capital_history, _get_stock_strategy
@@ -246,6 +246,12 @@ async def create_trade(
                 await recalculate_strategy_capital_history(session, user_id, strategy_id, start_date)
         except Exception:
             logger.exception("recalculate_strategy_capital_history failed")
+
+    if billing_enabled() and not user_has_active_subscription(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "BILLING_REQUIRED", "message": "非Pro会员无法新增交易记录，请先开通Pro会员"},
+        )
 
     stock_code = (trade_data.stock_code or "").strip()
     stock_name = trade_data.stock_name

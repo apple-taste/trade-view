@@ -8,9 +8,18 @@ interface User {
   email: string;
 }
 
+interface BillingStatus {
+  billing_enabled: boolean;
+  is_paid: boolean;
+  paid_until?: string | null;
+  plan?: string | null;
+}
+
 interface AuthContextType {
   user: User | null;
   token: string | null;
+  billingStatus: BillingStatus | null;
+  refreshBillingStatus: () => Promise<void>;
   login: (username: string, password: string) => Promise<void>;
   register: (username: string, email: string, password: string) => Promise<void>;
   logout: () => void;
@@ -22,6 +31,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
+  const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -32,6 +42,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setToken(savedToken);
       axios.defaults.headers.common['Authorization'] = `Bearer ${savedToken}`;
       fetchUserProfile();
+      fetchBillingStatus();
     } else {
       logger.info('ℹ️ [Auth] 未找到已保存的token');
       setLoading(false);
@@ -48,8 +59,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       logger.error('❌ [Auth] 获取用户信息失败', error.response?.data || error.message);
       localStorage.removeItem('token');
       setToken(null);
+      setBillingStatus(null);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchBillingStatus = async () => {
+    try {
+      const res = await axios.get('/api/user/billing-status');
+      setBillingStatus(res.data);
+    } catch {
+      setBillingStatus(null);
     }
   };
 
@@ -63,6 +84,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(userData);
       localStorage.setItem('token', newToken);
       axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+      await fetchBillingStatus();
     } catch (error: any) {
       logger.error('❌ [Auth] 登录失败', error.response?.data || error.message);
       throw error;
@@ -79,6 +101,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(userData);
       localStorage.setItem('token', newToken);
       axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+      await fetchBillingStatus();
     } catch (error: any) {
       logger.error('❌ [Auth] 注册失败', error.response?.data || error.message);
       throw error;
@@ -89,12 +112,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     logger.info('🚪 [Auth] 用户登出');
     setToken(null);
     setUser(null);
+    setBillingStatus(null);
     localStorage.removeItem('token');
     delete axios.defaults.headers.common['Authorization'];
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, login, register, logout, loading }}>
+    <AuthContext.Provider value={{ user, token, billingStatus, refreshBillingStatus: fetchBillingStatus, login, register, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );
