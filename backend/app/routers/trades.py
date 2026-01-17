@@ -313,6 +313,7 @@ async def create_trade(
                     # 计算手数：单笔风险 / 每股风险，向上取整
                     calculated_shares = trade_data.risk_per_trade / risk_per_share
                     shares = int(calculated_shares) + (1 if calculated_shares % 1 > 0 else 0)  # 向上取整
+                    shares = ((shares + 99) // 100) * 100
                     logger.info(f"   💰 [单笔风险] 单笔风险: {trade_data.risk_per_trade}, 每股风险: {risk_per_share:.2f}, 计算手数: {shares}")
                 else:
                     raise HTTPException(
@@ -329,6 +330,18 @@ async def create_trade(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="必须提供手数(shares)或单笔风险(risk_per_trade)"
             )
+
+    if shares is None or shares <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="手数(shares)必须大于0"
+        )
+
+    if shares % 100 != 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A股买入股数必须是100的整数倍"
+        )
     
     # 如果用户没有提供买入手续费，自动计算
     buy_commission = trade_data.buy_commission
@@ -588,6 +601,14 @@ async def update_trade(
             
             logger.info(f"📝 [更新交易] 修改离场价格: {trade.stock_code}, 旧价格: {old_sell_price}, 新价格: {sell_price}, 盈亏: {profit_loss:.2f}")
         
+        proposed_status = update_data.get('status', trade.status)
+        proposed_shares = update_data.get('shares', trade.shares)
+        if proposed_status == "open" and proposed_shares is not None:
+            if proposed_shares <= 0:
+                raise HTTPException(status_code=400, detail="手数(shares)必须大于0")
+            if proposed_shares % 100 != 0:
+                raise HTTPException(status_code=400, detail="A股买入股数必须是100的整数倍")
+
         for field, value in update_data.items():
             if value is not None:
                 setattr(trade, field, value)

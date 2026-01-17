@@ -235,10 +235,11 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
         const riskPerShare = buyPrice - stopLossPrice;
         // 计算手数：单笔风险 / 每股风险，向上取整
         const calculatedShares = Math.ceil(riskPerTrade / riskPerShare);
+        const lotShares = Math.ceil(calculatedShares / 100) * 100;
         
-        if (calculatedShares > 0) {
-          setFormData(prev => ({ ...prev, shares: calculatedShares.toString() }));
-          logger.info(`💰 [单笔风险] 自动计算手数: ${calculatedShares} (单笔风险: ${riskPerTrade}, 每股风险: ${riskPerShare.toFixed(2)})`);
+        if (lotShares > 0) {
+          setFormData(prev => ({ ...prev, shares: lotShares.toString() }));
+          logger.info(`💰 [单笔风险] 自动计算手数: ${lotShares} (单笔风险: ${riskPerTrade}, 每股风险: ${riskPerShare.toFixed(2)})`);
         }
       }
     }
@@ -457,6 +458,17 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
         return;
       }
 
+      const isBuyLotRequired = !editingTrade || editingTrade.status === 'open';
+      const sharesNum = formData.shares ? parseInt(formData.shares) : undefined;
+      if (isBuyLotRequired && sharesNum != null && Number.isFinite(sharesNum)) {
+        if (sharesNum <= 0 || sharesNum % 100 !== 0) {
+          alert('❌ A股买入股数必须是100的整数倍');
+          setIsSubmitting(false);
+          submitLockRef.current = false;
+          return;
+        }
+      }
+
       if (!editingTrade) {
         const canCreate = await ensureCanCreateTrade();
         if (!canCreate) {
@@ -478,7 +490,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       const data: any = {
         stock_code: formData.stock_code,
         stock_name: formData.stock_name || undefined,
-        shares: formData.shares ? parseInt(formData.shares) : undefined,
+        shares: sharesNum,
         commission: parseFloat(formData.commission),
         buy_commission: formData.buy_commission ? parseFloat(formData.buy_commission) : undefined,
         sell_commission: formData.sell_commission ? parseFloat(formData.sell_commission) : undefined,
@@ -1008,6 +1020,8 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
                 className="jojo-input"
                 placeholder={formData.risk_per_trade ? "自动计算" : "必填"}
                 required={!formData.risk_per_trade}
+                step={!editingTrade || editingTrade.status === 'open' ? 100 : 1}
+                min={1}
               />
             </div>
             <div>

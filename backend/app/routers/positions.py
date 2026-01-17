@@ -272,7 +272,8 @@ async def take_profit(
     await db.refresh(position)
     
     strategy = await _get_stock_strategy(db, current_user, position.strategy_id)
-    await recalculate_strategy_capital_history(db, current_user.id, strategy.id, close_time.date())
+    start_date = position.open_time.date() if position.open_time else close_time.date()
+    await recalculate_strategy_capital_history(db, current_user.id, strategy.id, start_date)
     
     # 计算风险回报比
     pos_dict = position.__dict__.copy()
@@ -388,7 +389,8 @@ async def stop_loss(
     await db.refresh(position)
     
     strategy = await _get_stock_strategy(db, current_user, position.strategy_id)
-    await recalculate_strategy_capital_history(db, current_user.id, strategy.id, close_time.date())
+    start_date = position.open_time.date() if position.open_time else close_time.date()
+    await recalculate_strategy_capital_history(db, current_user.id, strategy.id, start_date)
     
     # 准备返回数据
     pos_dict = position.__dict__.copy()

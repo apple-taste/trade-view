@@ -488,6 +488,7 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
                       dot={false}
                       name={s.name}
                       connectNulls
+                      isAnimationActive={false}
                     />
                   ))}
                 </LineChart>
@@ -529,6 +530,7 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
                   dot={{ fill: '#FFD700', r: 4 }}
                   activeDot={{ r: 6 }}
                   name="总资产"
+                  isAnimationActive={false}
                 />
                 <Line 
                   type="monotone" 
@@ -537,6 +539,7 @@ export default function UserPanel({ compact = false, showChart = false }: UserPa
                   strokeWidth={2}
                   dot={{ fill: '#10B981', r: 3 }}
                   name="可用资金"
+                  isAnimationActive={false}
                 />
               </LineChart>
             </ResponsiveContainer>
