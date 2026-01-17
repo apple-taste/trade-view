@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import axios from 'axios';
 import { useForex, type ForexTrade, type ForexSide, type ForexQuote } from '../../contexts/ForexContext';
 import { useLocale } from '../../contexts/LocaleContext';
 import { Plus, X, Edit, Trash2, CheckCircle2 } from 'lucide-react';
 import { useJojoModal } from '../JojoModal';
 import { useTrade } from '../../contexts/TradeContext';
-import { useNavigate } from 'react-router-dom';
 
 type ActiveTab = 'OPEN' | 'CLOSED';
 
@@ -53,7 +51,6 @@ export default function ForexTerminal() {
   const { account, openTrades, closedTrades, createTrade, closeTrade, updateTrade, deleteTrade, clearAllTrades, fetchQuotes, refresh } = useForex();
   const { t } = useLocale();
   const { confirm: jojoConfirm, prompt: jojoPrompt, Modal } = useJojoModal();
-  const navigate = useNavigate();
   const { forexStrategies, effectiveForexStrategyId, setCurrentForexStrategyId, createForexStrategy, deleteForexStrategy, deleteAllForexStrategies } = useTrade();
   const [activeTab, setActiveTab] = useState<ActiveTab>('OPEN');
   const [createOpen, setCreateOpen] = useState(false);
@@ -61,22 +58,6 @@ export default function ForexTerminal() {
   const [editTarget, setEditTarget] = useState<ForexTrade | null>(null);
   const [lotsManuallySet, setLotsManuallySet] = useState(false);
   const [liveQuote, setLiveQuote] = useState<ForexQuote | null>(null);
-
-  const ensureForexTradeCreateAllowed = async () => {
-    try {
-      const res = await axios.get('/api/user/billing-status');
-      const billingEnabled = Boolean(res.data?.billing_enabled);
-      const isPaid = Boolean(res.data?.is_paid);
-      if (billingEnabled && !isPaid) {
-        const ok = await jojoConfirm('需要会员', '非会员无法新增交易记录，请先开通会员');
-        if (ok) navigate('/billing?months=1');
-        return false;
-      }
-      return true;
-    } catch {
-      return true;
-    }
-  };
 
   const [createForm, setCreateForm] = useState(() => ({
     symbol: 'EURUSD',
@@ -411,8 +392,6 @@ export default function ForexTerminal() {
           </button>
           <button
             onClick={async () => {
-              const ok = await ensureForexTradeCreateAllowed();
-              if (!ok) return;
               setCreateOpen(true);
             }}
             className="px-3 py-1 text-xs font-bold rounded bg-jojo-gold text-gray-900 hover:bg-yellow-400 transition-colors flex items-center gap-1"

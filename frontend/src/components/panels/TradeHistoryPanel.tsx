@@ -8,7 +8,6 @@ import { logger } from '../../utils/logger';
 import { perfMonitor } from '../../utils/performance';
 import { useJojoModal } from '../JojoModal';
 import JojolandMascot from '../JojolandMascot';
-import { useNavigate } from 'react-router-dom';
 
 // 北京时间工具函数（UTC+8）
 const BEIJING_TIMEZONE_OFFSET = 8 * 60; // 8小时 = 480分钟
@@ -92,7 +91,6 @@ interface StockStatistics {
 
 export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelProps) {
   const { confirm, prompt, Modal } = useJojoModal();
-  const navigate = useNavigate();
   // 缓存交易记录: 日期 -> 交易列表
   const tradesCache = useRef<Record<string, Trade[]>>({});
   const [trades, setTrades] = useState<Trade[]>([]);
@@ -128,22 +126,6 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
     deleteAllStrategies
   } = useTrade();
   const { clearAlertsByStockCode } = useAlerts();
-
-  const ensureTradeCreateAllowed = async () => {
-    try {
-      const res = await axios.get('/api/user/billing-status');
-      const billingEnabled = Boolean(res.data?.billing_enabled);
-      const isPaid = Boolean(res.data?.is_paid);
-      if (billingEnabled && !isPaid) {
-        const ok = await confirm('需要会员', '非会员无法新增交易记录，请先开通会员');
-        if (ok) navigate('/billing?months=1');
-        return false;
-      }
-      return true;
-    } catch {
-      return true;
-    }
-  };
 
   const handleClearAllStrategies = async () => {
     if (strategies.length === 0) return;
@@ -436,13 +418,6 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       if (effectiveStrategyId == null) {
         alert('请先创建并选择策略');
         return;
-      }
-      if (!editingTrade) {
-        const ok = await ensureTradeCreateAllowed();
-        if (!ok) {
-          setShowForm(false);
-          return;
-        }
       }
       // 将北京时间转换为UTC时间发送给后端
       const utcTimeString = beijingTimeToUTC(formData.open_time);
@@ -779,8 +754,6 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
         <div className="flex items-center space-x-1 flex-shrink-0">
           <button
             onClick={async () => {
-              const ok = await ensureTradeCreateAllowed();
-              if (!ok) return;
               resetForm();
               setEditingTrade(null);
               setShowForm(true);

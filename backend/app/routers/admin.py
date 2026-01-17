@@ -10,7 +10,7 @@ from typing import Optional
 from pathlib import Path
 
 from app.database import get_db, User, Trade, ForexTrade, PaymentOrder, BillingPlanPrice
-from app.middleware.auth import get_current_admin
+from app.middleware.auth import get_current_admin, user_has_active_subscription
 from app.models import (
     AdminLogin,
     AdminTokenResponse,
@@ -201,7 +201,8 @@ async def get_admin_stats(
 ):
     now = datetime.utcnow()
     cutoff = now - timedelta(days=7)
-    today = date.today()
+    beijing_today = (now + timedelta(hours=8)).date()
+    paid_grace_cutoff = beijing_today - timedelta(days=7)
 
     total_users = (
         await db.execute(select(func.count()).select_from(User))
@@ -215,7 +216,7 @@ async def get_admin_stats(
         await db.execute(
             select(func.count())
             .select_from(User)
-            .where(or_(User.is_paid == True, and_(User.paid_until != None, User.paid_until >= today)))
+            .where(or_(User.is_paid == True, and_(User.paid_until != None, User.paid_until >= paid_grace_cutoff)))
         )
     ).scalar_one()
 
@@ -282,7 +283,7 @@ async def list_users(
             email=u.email,
             created_at=u.created_at,
             last_login_at=getattr(u, "last_login_at", None),
-            is_paid=bool(getattr(u, "is_paid", False)),
+            is_paid=user_has_active_subscription(u),
             paid_until=getattr(u, "paid_until", None),
             plan=getattr(u, "plan", None),
             total_paid=float(getattr(u, "total_paid", 0.0) or 0.0),
@@ -332,7 +333,7 @@ async def update_user(
         email=user.email,
         created_at=user.created_at,
         last_login_at=getattr(user, "last_login_at", None),
-        is_paid=bool(getattr(user, "is_paid", False)),
+        is_paid=user_has_active_subscription(user),
         paid_until=getattr(user, "paid_until", None),
         plan=getattr(user, "plan", None),
         total_paid=float(getattr(user, "total_paid", 0.0) or 0.0),

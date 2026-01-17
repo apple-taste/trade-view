@@ -2,12 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, distinct
 from datetime import datetime, date, timedelta, timezone
+import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
 
-from app.database import get_db, Trade, CapitalHistory
-from app.middleware.auth import get_current_user, billing_enabled, user_has_active_subscription
+from app.database import get_db, Trade, CapitalHistory, AsyncSessionLocal
+from app.middleware.auth import get_current_user
 from app.models import TradeCreate, TradeUpdate, TradeResponse, PaginatedTradeResponse
 from app.database import User
 from app.routers.user import recalculate_capital_history, recalculate_strategy_capital_history, _get_stock_strategy
@@ -239,8 +240,27 @@ async def create_trade(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    if billing_enabled() and not user_has_active_subscription(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="非会员无法新增交易记录，请先开通会员")
+    async def _recalculate_strategy_capital_history_async(user_id: int, strategy_id: int, start_date: date):
+        try:
+            async with AsyncSessionLocal() as session:
+                await recalculate_strategy_capital_history(session, user_id, strategy_id, start_date)
+        except Exception:
+            logger.exception("recalculate_strategy_capital_history failed")
+
+    stock_code = (trade_data.stock_code or "").strip()
+    stock_name = trade_data.stock_name
+    if (not stock_name or stock_name.strip() == "") and stock_code:
+        if "-" in stock_code:
+            left, right = stock_code.split("-", 1)
+            if right.strip():
+                stock_name = right.strip()
+            stock_code = left.strip()
+        elif " " in stock_code:
+            left, right = stock_code.split(" ", 1)
+            if right.strip():
+                stock_name = right.strip()
+            stock_code = left.strip()
+
     # 处理open_time：如果有时区信息，转换为naive UTC时间
     if trade_data.open_time:
         open_time = trade_data.open_time
@@ -251,19 +271,8 @@ async def create_trade(
     else:
         open_time = datetime.utcnow()
     
-    # 如果用户没有提供股票名称，自动从API获取
-    stock_name = trade_data.stock_name
-    if not stock_name or stock_name.strip() == "":
-        logger.info(f"📝 [创建交易] 用户 {current_user.username}, 股票 {trade_data.stock_code} - 自动获取股票名称")
-        fetched_name = await price_monitor.fetch_stock_name(trade_data.stock_code)
-        if fetched_name:
-            stock_name = fetched_name
-            logger.info(f"   ✅ 获取到股票名称: {stock_name}")
-        else:
-            logger.warning(f"   ⚠️ 无法获取股票名称，将使用空值")
-    
     # 添加调试日志
-    logger.info(f"📝 [创建交易] 用户 {current_user.username}, 股票 {trade_data.stock_code}, 名称: {stock_name}")
+    logger.info(f"📝 [创建交易] 用户 {current_user.username}, 股票 {stock_code}, 名称: {stock_name}")
     logger.info(f"   接收到的open_time: {trade_data.open_time}")
     logger.info(f"   处理后的open_time (UTC): {open_time}")
     logger.info(f"   UTC日期: {open_time.date()}")
@@ -324,7 +333,7 @@ async def create_trade(
     new_trade = Trade(
         user_id=current_user.id,
         strategy_id=strategy.id,
-        stock_code=trade_data.stock_code,
+        stock_code=stock_code,
         stock_name=stock_name,
         open_time=open_time,
         shares=shares,
@@ -346,8 +355,7 @@ async def create_trade(
     
     await db.commit()
     await db.refresh(new_trade)
-    
-    await recalculate_strategy_capital_history(db, current_user.id, strategy.id, open_time.date())
+    asyncio.create_task(_recalculate_strategy_capital_history_async(current_user.id, strategy.id, open_time.date()))
     
     # 准备返回数据（保持兼容性）
     trade_dict = new_trade.__dict__.copy()

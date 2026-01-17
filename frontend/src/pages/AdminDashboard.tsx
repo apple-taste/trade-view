@@ -79,9 +79,20 @@ function getAdminHeaders() {
 
 function formatDateTime(input?: string) {
   if (!input) return '-';
-  const d = new Date(input);
+  let trimmed = String(input).trim();
+  if (trimmed.includes(' ') && !trimmed.includes('T')) {
+    trimmed = trimmed.replace(' ', 'T');
+  }
+  const hasTimezone =
+    /[zZ]$/.test(trimmed) || /[+-]\d{2}:\d{2}$/.test(trimmed);
+  const normalized = hasTimezone
+    ? trimmed
+    : /^\d{4}-\d{2}-\d{2}$/.test(trimmed)
+      ? `${trimmed}T00:00:00Z`
+      : `${trimmed}Z`;
+  const d = new Date(normalized);
   if (Number.isNaN(d.getTime())) return '-';
-  return d.toLocaleString();
+  return d.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
 }
 
 export default function AdminDashboard() {

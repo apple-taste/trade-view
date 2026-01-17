@@ -2,11 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update
 from datetime import datetime, date, timezone, timedelta
+import asyncio
 import time
 import aiohttp
 
-from app.database import get_db, User, ForexAccount, ForexTrade, Strategy
-from app.middleware.auth import get_current_user, billing_enabled, user_has_active_subscription
+from app.database import get_db, User, ForexAccount, ForexTrade, Strategy, AsyncSessionLocal
+from app.middleware.auth import get_current_user
 from app.routers.user import _get_forex_strategy
 from app.models import (
     ForexAccountResponse,
@@ -513,8 +514,13 @@ async def create_trade(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if billing_enabled() and not user_has_active_subscription(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="非会员无法新增交易记录，请先开通会员")
+    async def _recalculate_account_async(user_id: int, strategy_id_value: int):
+        try:
+            async with AsyncSessionLocal() as session:
+                await _recalculate_account(session, user_id, strategy_id_value)
+        except Exception:
+            pass
+
     requested_strategy_id = payload.strategy_id if payload.strategy_id is not None else strategy_id
     strategy = await _get_forex_strategy(db, current_user, requested_strategy_id)
     open_time = payload.open_time
@@ -543,7 +549,7 @@ async def create_trade(
 
     await db.commit()
     await db.refresh(trade)
-    await _recalculate_account(db, current_user.id, strategy.id)
+    asyncio.create_task(_recalculate_account_async(current_user.id, strategy.id))
     return _to_trade_response(trade)
 
 @router.delete("/trades/clear-all", summary="清空外汇交易记录（软删除）")
