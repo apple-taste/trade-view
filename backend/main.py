@@ -370,6 +370,13 @@ async def health_check(request: Request):
 # 静态文件服务（必须放在所有API路由之后）
 static_dir = Path(__file__).parent / "static"
 static_dir.mkdir(parents=True, exist_ok=True)
+
+payments_dir = static_dir / "payments"
+db_dir = (os.getenv("DB_DIR") or "").strip()
+if db_dir:
+    payments_dir = Path(db_dir) / "payments"
+payments_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/static/payments", StaticFiles(directory=str(payments_dir)), name="payments")
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 logger.info(f"✅ 静态文件服务已挂载: {static_dir}")
 
