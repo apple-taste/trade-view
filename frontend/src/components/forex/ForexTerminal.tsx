@@ -160,8 +160,36 @@ export default function ForexTerminal() {
     return { margin, leverage };
   }, [account.leverage, createForm.lots, createForm.openPrice, createForm.symbol]);
 
+  const ensureCanCreateTrade = async (): Promise<boolean> => {
+    try {
+      const res = await axios.get('/api/user/billing-status');
+      const bs = res.data;
+      if (!bs?.is_paid) {
+        const ok = await jojoConfirm('需要会员', 'FREE用户无法新增交易记录，请先开通Pro会员');
+        if (ok) {
+          await refreshBillingStatus();
+          setCreateOpen(false);
+          navigate('/billing?months=1');
+        }
+        return false;
+      }
+      return true;
+    } catch {
+      const ok = await jojoConfirm('需要会员', '无法校验会员状态，请先开通Pro会员后再新增交易记录');
+      if (ok) {
+        await refreshBillingStatus();
+        setCreateOpen(false);
+        navigate('/billing?months=1');
+      }
+      return false;
+    }
+  };
+
   const handleCreate = async () => {
     try {
+      const canCreate = await ensureCanCreateTrade();
+      if (!canCreate) return;
+
       const lots = Number(createForm.lots);
       const openPrice = Number(createForm.openPrice);
       if (!createForm.symbol.trim()) throw new Error('Symbol required');
@@ -193,7 +221,7 @@ export default function ForexTerminal() {
         const msg =
           (typeof detail === 'object' && detail?.message) ||
           (typeof detail === 'string' ? detail : '') ||
-          '非Pro会员无法新增交易记录，请先开通Pro会员';
+          'FREE用户无法新增交易记录，请先开通Pro会员';
         const ok = await jojoConfirm('需要会员', msg);
         if (ok) {
           await refreshBillingStatus();
@@ -421,19 +449,8 @@ export default function ForexTerminal() {
           </button>
           <button
             onClick={async () => {
-              try {
-                const res = await axios.get('/api/user/billing-status');
-                const bs = res.data;
-                if (bs?.billing_enabled && !bs?.is_paid) {
-                  const ok = await jojoConfirm('需要会员', '非Pro会员无法新增交易记录，请先开通Pro会员');
-                  if (ok) {
-                    await refreshBillingStatus();
-                    navigate('/billing?months=1');
-                  }
-                  return;
-                }
-              } catch {
-              }
+              const canCreate = await ensureCanCreateTrade();
+              if (!canCreate) return;
               setCreateOpen(true);
             }}
             className="px-3 py-1 text-xs font-bold rounded bg-jojo-gold text-gray-900 hover:bg-yellow-400 transition-colors flex items-center gap-1"

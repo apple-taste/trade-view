@@ -131,6 +131,31 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
   } = useTrade();
   const { clearAlertsByStockCode } = useAlerts();
 
+  const ensureCanCreateTrade = useCallback(async (): Promise<boolean> => {
+    try {
+      const res = await axios.get('/api/user/billing-status');
+      const bs = res.data;
+      if (!bs?.is_paid) {
+        const ok = await confirm('需要会员', 'FREE用户无法新增交易记录，请先开通Pro会员');
+        if (ok) {
+          await refreshBillingStatus();
+          setShowForm(false);
+          navigate('/billing?months=1');
+        }
+        return false;
+      }
+      return true;
+    } catch {
+      const ok = await confirm('需要会员', '无法校验会员状态，请先开通Pro会员后再新增交易记录');
+      if (ok) {
+        await refreshBillingStatus();
+        setShowForm(false);
+        navigate('/billing?months=1');
+      }
+      return false;
+    }
+  }, [confirm, navigate, refreshBillingStatus]);
+
   const handleClearAllStrategies = async () => {
     if (strategies.length === 0) return;
     const firstConfirm = await confirm(
@@ -423,6 +448,12 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
         alert('请先创建并选择策略');
         return;
       }
+
+      if (!editingTrade) {
+        const canCreate = await ensureCanCreateTrade();
+        if (!canCreate) return;
+      }
+
       // 将北京时间转换为UTC时间发送给后端
       const utcTimeString = beijingTimeToUTC(formData.open_time);
       
@@ -517,7 +548,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
         const msg =
           (typeof detail === 'object' && detail?.message) ||
           (typeof detail === 'string' ? detail : '') ||
-          '非Pro会员无法新增交易记录，请先开通Pro会员';
+          'FREE用户无法新增交易记录，请先开通Pro会员';
         const ok = await confirm('需要会员', msg);
         if (ok) {
           await refreshBillingStatus();
@@ -782,19 +813,8 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
         <div className="flex items-center space-x-1 flex-shrink-0">
           <button
             onClick={async () => {
-              try {
-                const res = await axios.get('/api/user/billing-status');
-                const bs = res.data;
-                if (bs?.billing_enabled && !bs?.is_paid) {
-                  const ok = await confirm('需要会员', '非Pro会员无法新增交易记录，请先开通Pro会员');
-                  if (ok) {
-                    await refreshBillingStatus();
-                    navigate('/billing?months=1');
-                  }
-                  return;
-                }
-              } catch {
-              }
+              const canCreate = await ensureCanCreateTrade();
+              if (!canCreate) return;
               resetForm();
               setEditingTrade(null);
               setShowForm(true);

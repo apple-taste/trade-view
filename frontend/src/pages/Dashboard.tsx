@@ -171,19 +171,17 @@ export default function Dashboard() {
             >
               <RotateCcw size={16} />
             </button>
-            <div className="hidden md:flex items-center gap-2">
-              {billingStatus?.billing_enabled ? (
-                <span
-                  className={`px-2 py-0.5 rounded text-[11px] font-extrabold border ${
-                    billingStatus.is_paid
-                      ? 'bg-jojo-gold text-gray-900 border-yellow-400'
-                      : 'bg-gray-800 text-gray-200 border-gray-700'
-                  }`}
-                >
-                  {billingStatus.is_paid ? 'PRO' : 'FREE'}
-                </span>
-              ) : null}
-              <span className="text-jojo-gold font-bold text-sm">{t('nav.welcome')}, {user?.username}</span>
+            <div className="flex items-center gap-2 min-w-0">
+              <span
+                className={`px-2 py-0.5 rounded text-[11px] font-extrabold border ${
+                  billingStatus?.is_paid
+                    ? 'bg-jojo-gold text-gray-900 border-yellow-400'
+                    : 'bg-gray-800 text-gray-200 border-gray-700'
+                }`}
+              >
+                {billingStatus?.is_paid ? 'PRO' : 'FREE'}
+              </span>
+              <span className="text-jojo-gold font-bold text-sm truncate">{t('nav.welcome')}, {user?.username}</span>
             </div>
             <button
               onClick={logout}
