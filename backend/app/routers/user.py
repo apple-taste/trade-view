@@ -554,6 +554,24 @@ async def get_capital_history(
         for h in history
     ]
 
+
+@router.post("/capital-history/recalculate", summary="手动重算资金曲线")
+async def recalculate_capital_history_endpoint(
+    strategy_id: int | None = None,
+    start_date: date | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if strategy_id is None:
+        anchor = start_date or getattr(current_user, "initial_capital_date", None) or date.today()
+        await recalculate_capital_history(db, current_user.id, anchor)
+        return {"message": "资金曲线已重算", "strategy_id": None, "start_date": str(anchor)}
+
+    strategy = await _get_stock_strategy(db, current_user, strategy_id)
+    anchor = start_date or getattr(strategy, "initial_date", None) or getattr(current_user, "initial_capital_date", None) or date.today()
+    await recalculate_strategy_capital_history(db, current_user.id, strategy.id, anchor)
+    return {"message": "资金曲线已重算", "strategy_id": strategy.id, "start_date": str(anchor)}
+
 @router.post(
     "/capital",
     summary="设置初始资金（策略回测起点）",
@@ -1339,6 +1357,17 @@ async def _ensure_strategy_capital_history_uptodate(db: AsyncSession, user_id: i
         latest_pos_val = float(latest.position_value or 0.0) if latest is not None else 0.0
         if open_count == 0 and latest_pos_val > 1e-6:
             should_recalc = True
+        if not should_recalc and latest is not None and latest.created_at is not None:
+            last_updated_result = await db.execute(
+                select(func.max(Trade.updated_at)).where(
+                    Trade.user_id == user_id,
+                    Trade.strategy_id == strategy_id,
+                    Trade.is_deleted == False,
+                )
+            )
+            last_updated = last_updated_result.scalar()
+            if last_updated is not None and last_updated > latest.created_at:
+                should_recalc = True
 
     if not should_recalc:
         return
