@@ -4,13 +4,15 @@ import { X, TrendingUp, TrendingDown } from 'lucide-react';
 interface JojoPriceModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (result: { price: string; date?: string }) => void;
+  onConfirm: (result: { price: string; date?: string; shares?: string }) => void;
   type: 'take_profit' | 'stop_loss';
   stockCode: string;
   stockName?: string;
   currentPrice?: number;
   targetPrice?: number;
   defaultValue?: string;
+  maxShares?: number;
+  defaultShares?: number;
 }
 
 export default function JojoPriceModal({
@@ -22,10 +24,13 @@ export default function JojoPriceModal({
   stockName,
   currentPrice,
   targetPrice,
-  defaultValue = ''
+  defaultValue = '',
+  maxShares,
+  defaultShares,
 }: JojoPriceModalProps) {
   const [price, setPrice] = useState(defaultValue);
   const [closeDate, setCloseDate] = useState('');
+  const [shares, setShares] = useState('');
 
   useEffect(() => {
     if (isOpen) {
@@ -38,13 +43,15 @@ export default function JojoPriceModal({
       const beijingTime = new Date(utcTime + beijingOffset);
       const dateStr = beijingTime.toISOString().split('T')[0];
       setCloseDate(dateStr);
+      const nextShares = (defaultShares ?? maxShares)?.toString() ?? '';
+      setShares(nextShares);
     }
-  }, [isOpen, defaultValue, targetPrice]);
+  }, [isOpen, defaultValue, targetPrice, defaultShares, maxShares]);
 
   if (!isOpen) return null;
 
   const handleConfirm = () => {
-    onConfirm({ price, date: closeDate || undefined });
+    onConfirm({ price, date: closeDate || undefined, shares: shares || undefined });
     onClose();
   };
 
@@ -127,6 +134,32 @@ export default function JojoPriceModal({
               <span className="text-white font-bold">¥{currentPrice.toFixed(2)}</span>
             </div>
           )}
+
+          <div className="space-y-2">
+            <label className="text-white font-bold text-lg">
+              {isTakeProfit ? '📦 止盈股数' : '📦 止损股数'}
+            </label>
+            <div className="relative">
+              <input
+                type="number"
+                value={shares}
+                onChange={(e) => setShares(e.target.value)}
+                onKeyDown={handleKeyDown}
+                min={100}
+                max={maxShares}
+                step={100}
+                placeholder={maxShares != null ? `例如: ${maxShares}` : '例如: 1000'}
+                className={`w-full px-4 py-4 rounded-lg text-white text-2xl font-bold focus:outline-none transition-all placeholder-gray-500 ${
+                  isTakeProfit
+                    ? 'bg-green-900/50 border-2 border-green-500 focus:border-green-400'
+                    : 'bg-red-900/50 border-2 border-red-500 focus:border-red-400'
+                }`}
+                style={{
+                  textShadow: '0 0 8px rgba(255, 255, 255, 0.8)',
+                }}
+              />
+            </div>
+          </div>
 
           {/* 离场价格输入框 */}
           <div className="space-y-2">
@@ -258,7 +291,9 @@ export function useJojoPriceModal() {
     currentPrice?: number;
     targetPrice?: number;
     defaultValue?: string;
-    resolve?: (value: { price: string; date?: string } | null) => void;
+    maxShares?: number;
+    defaultShares?: number;
+    resolve?: (value: { price: string; date?: string; shares?: string } | null) => void;
   }>({
     isOpen: false,
     type: 'take_profit',
@@ -271,8 +306,10 @@ export function useJojoPriceModal() {
     stockName?: string,
     currentPrice?: number,
     targetPrice?: number,
-    defaultValue?: string
-  ): Promise<{ price: string; date?: string } | null> => {
+    defaultValue?: string,
+    maxShares?: number,
+    defaultShares?: number
+  ): Promise<{ price: string; date?: string; shares?: string } | null> => {
     return new Promise((resolve) => {
       setModalState({
         isOpen: true,
@@ -282,6 +319,8 @@ export function useJojoPriceModal() {
         currentPrice,
         targetPrice,
         defaultValue,
+        maxShares,
+        defaultShares,
         resolve,
       });
     });
@@ -295,7 +334,7 @@ export function useJojoPriceModal() {
     }
   };
 
-  const handleConfirm = (result: { price: string; date?: string }) => {
+  const handleConfirm = (result: { price: string; date?: string; shares?: string }) => {
     const resolveFunc = modalState.resolve;
     setModalState((prev) => ({ ...prev, isOpen: false, resolve: undefined }));
     if (resolveFunc) {
@@ -314,6 +353,8 @@ export function useJojoPriceModal() {
       currentPrice={modalState.currentPrice}
       targetPrice={modalState.targetPrice}
       defaultValue={modalState.defaultValue}
+      maxShares={modalState.maxShares}
+      defaultShares={modalState.defaultShares}
     />
   );
 

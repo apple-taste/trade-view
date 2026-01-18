@@ -291,10 +291,12 @@ class PositionUpdate(BaseModel):
 class TakeProfitRequest(BaseModel):
     sell_price: float
     close_date: Optional[str] = None  # 离场日期（YYYY-MM-DD格式，北京时间），可选，默认使用当前时间
+    shares: Optional[int] = None  # 止盈股数（可选，默认全部平仓）
 
 class StopLossRequest(BaseModel):
     sell_price: float
     close_date: Optional[str] = None  # 离场日期（YYYY-MM-DD格式，北京时间），可选，默认使用当前时间
+    shares: Optional[int] = None  # 止损股数（可选，默认全部平仓）
 
 # AI分析相关
 class AnalysisSummary(BaseModel):

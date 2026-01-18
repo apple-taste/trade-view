@@ -551,6 +551,11 @@ async def update_trade(
                     from datetime import timezone
                     update_data['close_time'] = update_data['close_time'].astimezone(timezone.utc).replace(tzinfo=None)
                     logger.info(f"✅ [更新交易] close_time 时区已移除: {update_data['close_time']}")
+
+            if update_data.get('close_time') is not None:
+                open_dt = update_data.get('open_time', trade.open_time)
+                if open_dt is not None and update_data['close_time'] < open_dt:
+                    update_data['close_time'] = open_dt
         
         # 如果用户更新了买入价格或股数，且没有提供手续费，自动重新计算手续费
         if 'commission' not in update_data or update_data['commission'] is None:
@@ -598,6 +603,13 @@ async def update_trade(
             # 如果交易已平仓，更新状态
             if 'status' not in update_data:
                 update_data['status'] = 'closed'
+
+            if update_data.get('status') == 'closed':
+                if 'close_time' not in update_data or update_data.get('close_time') is None:
+                    update_data['close_time'] = trade.close_time or datetime.utcnow()
+                open_dt = update_data.get('open_time', trade.open_time)
+                if open_dt is not None and update_data['close_time'] < open_dt:
+                    update_data['close_time'] = open_dt
             
             logger.info(f"📝 [更新交易] 修改离场价格: {trade.stock_code}, 旧价格: {old_sell_price}, 新价格: {sell_price}, 盈亏: {profit_loss:.2f}")
         
@@ -643,7 +655,8 @@ async def update_trade(
                 strategy_ids.add(int(trade.strategy_id))
 
             for sid in strategy_ids:
-                await recalculate_strategy_capital_history(db, current_user.id, sid, trade.open_time.date())
+                anchor = trade.open_time.date() if trade.open_time is not None else date.min
+                await recalculate_strategy_capital_history(db, current_user.id, sid, anchor)
         
         # 计算风险回报比
         trade_dict = trade.__dict__.copy()

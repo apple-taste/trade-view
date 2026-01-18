@@ -13,6 +13,27 @@ from app.routers.user import recalculate_strategy_capital_history, _get_stock_st
 
 router = APIRouter()
 
+def _resolve_close_time(close_date: str | None) -> datetime:
+    if close_date:
+        try:
+            date_obj = datetime.strptime(close_date, '%Y-%m-%d').date()
+            beijing_tz = ZoneInfo('Asia/Shanghai')
+            beijing_datetime = datetime.combine(date_obj, datetime.min.time().replace(hour=12)).replace(tzinfo=beijing_tz)
+            return beijing_datetime.astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
+        except (ValueError, Exception):
+            return datetime.utcnow()
+    return datetime.utcnow()
+
+def _validate_partial_close_shares(position_shares: int, requested_shares: int | None) -> int:
+    shares_to_close = requested_shares if requested_shares is not None else position_shares
+    if shares_to_close <= 0:
+        raise HTTPException(status_code=400, detail="止盈/止损股数必须大于0")
+    if shares_to_close > position_shares:
+        raise HTTPException(status_code=400, detail="止盈/止损股数不能大于持仓股数")
+    if shares_to_close % 100 != 0:
+        raise HTTPException(status_code=400, detail="A股卖出股数必须是100的整数倍")
+    return shares_to_close
+
 async def update_capital_from_trade(db: AsyncSession, user_id: int, capital_change: float, trade_date: date):
     """
     根据交易更新资金历史
@@ -214,39 +235,29 @@ async def take_profit(
     if not position:
         raise HTTPException(status_code=404, detail="持仓不存在、已平仓或已被删除")
     
-    # 处理离场日期（用户选择或默认当前时间）
-    if request.close_date:
-        # 用户提供了日期，解析为UTC时间（假设日期是北京时间）
-        try:
-            # 解析日期字符串（YYYY-MM-DD）
-            date_obj = datetime.strptime(request.close_date, '%Y-%m-%d').date()
-            # 转换为北京时间当天的12:00:00（UTC+8）
-            beijing_tz = ZoneInfo('Asia/Shanghai')
-            beijing_datetime = datetime.combine(date_obj, datetime.min.time().replace(hour=12)).replace(tzinfo=beijing_tz)
-            # 转换为UTC时间
-            close_time = beijing_datetime.astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
-        except (ValueError, Exception):
-            # 日期格式错误或其他错误，使用当前时间
-            close_time = datetime.utcnow()
-    else:
-        # 未提供日期，使用当前时间
-        close_time = datetime.utcnow()
+    close_time = _resolve_close_time(request.close_date)
+
+    if position.open_time and close_time < position.open_time:
+        close_time = position.open_time
     
     holding_days = (close_time - position.open_time).days if position.open_time else 0
+
+    shares_to_close = _validate_partial_close_shares(position.shares, request.shares)
     
     # 计算卖出手续费（包括佣金、印花税、过户费）
     sell_commission = default_calculator.calculate_sell_commission(
         request.sell_price,
-        position.shares,
+        shares_to_close,
         position.stock_code
     )
     
     # 总手续费 = 买入手续费 + 卖出手续费
-    buy_commission = position.buy_commission or position.commission or 0
-    total_commission = buy_commission + sell_commission
+    original_buy_commission = position.buy_commission or 0
+    closed_buy_commission = original_buy_commission if shares_to_close == position.shares else round(original_buy_commission * (shares_to_close / position.shares), 6)
+    total_commission = closed_buy_commission + sell_commission
     
     # 计算盈亏：卖出价*手数 - 买入价*手数 - 总手续费
-    profit_loss = (request.sell_price - position.buy_price) * position.shares - total_commission
+    profit_loss = (request.sell_price - position.buy_price) * shares_to_close - total_commission
     
     # 计算实际风险回报比（止盈单）
     # 实际风险回报比 = (实际离场价 - 入场价) / (入场价 - 止损价)
@@ -256,38 +267,88 @@ async def take_profit(
         actual_reward = request.sell_price - position.buy_price  # 使用实际离场价
         if risk > 0:
             actual_rrr = round(actual_reward / risk, 2)
-    
-    position.close_time = close_time
-    position.sell_price = request.sell_price
-    position.status = "closed"
-    position.order_result = "止盈"
-    position.holding_days = holding_days
-    position.profit_loss = profit_loss
-    position.sell_commission = sell_commission  # 保存卖出手续费
-    position.commission = total_commission  # 更新总手续费
-    position.actual_risk_reward_ratio = actual_rrr  # 保存实际风险回报比
+
+    if shares_to_close == position.shares:
+        position.close_time = close_time
+        position.sell_price = request.sell_price
+        position.status = "closed"
+        position.order_result = "止盈"
+        position.holding_days = holding_days
+        position.profit_loss = profit_loss
+        position.sell_commission = sell_commission
+        position.commission = total_commission
+        position.actual_risk_reward_ratio = actual_rrr
+        position.updated_at = close_time
+
+        await db.commit()
+        await db.refresh(position)
+
+        strategy = await _get_stock_strategy(db, current_user, position.strategy_id)
+        start_date = position.open_time.date() if position.open_time else close_time.date()
+        await recalculate_strategy_capital_history(db, current_user.id, strategy.id, start_date)
+
+        pos_dict = position.__dict__.copy()
+        if position.buy_price and position.stop_loss_price and position.take_profit_price:
+            risk = position.buy_price - position.stop_loss_price
+            reward = position.take_profit_price - position.buy_price
+            if risk > 0:
+                pos_dict['risk_reward_ratio'] = round(reward / risk, 2)
+            else:
+                pos_dict['risk_reward_ratio'] = None
+        else:
+            pos_dict['risk_reward_ratio'] = None
+
+        return TradeResponse(**pos_dict)
+
+    remaining_shares = position.shares - shares_to_close
+    remaining_buy_commission = round(original_buy_commission - closed_buy_commission, 6)
+
+    closed_trade = Trade(
+        user_id=position.user_id,
+        strategy_id=position.strategy_id,
+        stock_code=position.stock_code,
+        stock_name=position.stock_name,
+        open_time=position.open_time,
+        close_time=close_time,
+        shares=shares_to_close,
+        commission=total_commission,
+        buy_commission=closed_buy_commission,
+        sell_commission=sell_commission,
+        buy_price=position.buy_price,
+        sell_price=request.sell_price,
+        stop_loss_price=position.stop_loss_price,
+        take_profit_price=position.take_profit_price,
+        stop_loss_alert=position.stop_loss_alert,
+        take_profit_alert=position.take_profit_alert,
+        holding_days=holding_days,
+        order_result="止盈",
+        profit_loss=profit_loss,
+        theoretical_risk_reward_ratio=position.theoretical_risk_reward_ratio,
+        actual_risk_reward_ratio=actual_rrr,
+        notes=position.notes or "",
+        status="closed",
+    )
+
+    position.shares = remaining_shares
+    position.buy_commission = remaining_buy_commission
+    position.commission = remaining_buy_commission
     position.updated_at = close_time
-    
+
+    db.add(closed_trade)
+
     await db.commit()
-    await db.refresh(position)
+    await db.refresh(closed_trade)
     
     strategy = await _get_stock_strategy(db, current_user, position.strategy_id)
     start_date = position.open_time.date() if position.open_time else close_time.date()
     await recalculate_strategy_capital_history(db, current_user.id, strategy.id, start_date)
     
-    # 计算风险回报比
-    pos_dict = position.__dict__.copy()
-    if position.buy_price and position.stop_loss_price and position.take_profit_price:
-        risk = position.buy_price - position.stop_loss_price
-        reward = position.take_profit_price - position.buy_price
-        if risk > 0:
-            pos_dict['risk_reward_ratio'] = round(reward / risk, 2)
-        else:
-            pos_dict['risk_reward_ratio'] = None
-    else:
-        pos_dict['risk_reward_ratio'] = None
-    
-    return TradeResponse(**pos_dict)
+    trade_dict = closed_trade.__dict__.copy()
+    trade_dict['risk_reward_ratio'] = closed_trade.theoretical_risk_reward_ratio
+    trade_dict['theoretical_risk_reward_ratio'] = closed_trade.theoretical_risk_reward_ratio
+    trade_dict['actual_risk_reward_ratio'] = closed_trade.actual_risk_reward_ratio
+
+    return TradeResponse(**trade_dict)
 
 @router.post(
     "/{position_id}/stop-loss",
@@ -331,39 +392,29 @@ async def stop_loss(
     if not position:
         raise HTTPException(status_code=404, detail="持仓不存在、已平仓或已被删除")
     
-    # 处理离场日期（用户选择或默认当前时间）
-    if request.close_date:
-        # 用户提供了日期，解析为UTC时间（假设日期是北京时间）
-        try:
-            # 解析日期字符串（YYYY-MM-DD）
-            date_obj = datetime.strptime(request.close_date, '%Y-%m-%d').date()
-            # 转换为北京时间当天的12:00:00（UTC+8）
-            beijing_tz = ZoneInfo('Asia/Shanghai')
-            beijing_datetime = datetime.combine(date_obj, datetime.min.time().replace(hour=12)).replace(tzinfo=beijing_tz)
-            # 转换为UTC时间
-            close_time = beijing_datetime.astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
-        except (ValueError, Exception):
-            # 日期格式错误或其他错误，使用当前时间
-            close_time = datetime.utcnow()
-    else:
-        # 未提供日期，使用当前时间
-        close_time = datetime.utcnow()
+    close_time = _resolve_close_time(request.close_date)
+
+    if position.open_time and close_time < position.open_time:
+        close_time = position.open_time
     
     holding_days = (close_time - position.open_time).days if position.open_time else 0
+
+    shares_to_close = _validate_partial_close_shares(position.shares, request.shares)
     
     # 计算卖出手续费（包括佣金、印花税、过户费）
     sell_commission = default_calculator.calculate_sell_commission(
         request.sell_price,
-        position.shares,
+        shares_to_close,
         position.stock_code
     )
     
     # 总手续费 = 买入手续费 + 卖出手续费
-    buy_commission = position.buy_commission or position.commission or 0
-    total_commission = buy_commission + sell_commission
+    original_buy_commission = position.buy_commission or 0
+    closed_buy_commission = original_buy_commission if shares_to_close == position.shares else round(original_buy_commission * (shares_to_close / position.shares), 6)
+    total_commission = closed_buy_commission + sell_commission
     
     # 计算盈亏：卖出价*手数 - 买入价*手数 - 总手续费
-    profit_loss = (request.sell_price - position.buy_price) * position.shares - total_commission
+    profit_loss = (request.sell_price - position.buy_price) * shares_to_close - total_commission
     
     # 计算实际风险回报比（止损单）
     # 实际风险回报比 = (止盈价 - 入场价) / (入场价 - 实际离场价)
@@ -373,30 +424,79 @@ async def stop_loss(
         theoretical_reward = position.take_profit_price - position.buy_price
         if actual_risk > 0:
             actual_rrr = round(theoretical_reward / actual_risk, 2)
-    
-    position.close_time = close_time
-    position.sell_price = request.sell_price
-    position.status = "closed"
-    position.order_result = "止损"
-    position.holding_days = holding_days
-    position.profit_loss = profit_loss
-    position.sell_commission = sell_commission  # 保存卖出手续费
-    position.commission = total_commission  # 更新总手续费
-    position.actual_risk_reward_ratio = actual_rrr  # 保存实际风险回报比
+
+    if shares_to_close == position.shares:
+        position.close_time = close_time
+        position.sell_price = request.sell_price
+        position.status = "closed"
+        position.order_result = "止损"
+        position.holding_days = holding_days
+        position.profit_loss = profit_loss
+        position.sell_commission = sell_commission
+        position.commission = total_commission
+        position.actual_risk_reward_ratio = actual_rrr
+        position.updated_at = close_time
+
+        await db.commit()
+        await db.refresh(position)
+
+        strategy = await _get_stock_strategy(db, current_user, position.strategy_id)
+        start_date = position.open_time.date() if position.open_time else close_time.date()
+        await recalculate_strategy_capital_history(db, current_user.id, strategy.id, start_date)
+
+        pos_dict = position.__dict__.copy()
+        pos_dict['risk_reward_ratio'] = position.theoretical_risk_reward_ratio
+        pos_dict['theoretical_risk_reward_ratio'] = position.theoretical_risk_reward_ratio
+        pos_dict['actual_risk_reward_ratio'] = actual_rrr
+
+        return TradeResponse(**pos_dict)
+
+    remaining_shares = position.shares - shares_to_close
+    remaining_buy_commission = round(original_buy_commission - closed_buy_commission, 6)
+
+    closed_trade = Trade(
+        user_id=position.user_id,
+        strategy_id=position.strategy_id,
+        stock_code=position.stock_code,
+        stock_name=position.stock_name,
+        open_time=position.open_time,
+        close_time=close_time,
+        shares=shares_to_close,
+        commission=total_commission,
+        buy_commission=closed_buy_commission,
+        sell_commission=sell_commission,
+        buy_price=position.buy_price,
+        sell_price=request.sell_price,
+        stop_loss_price=position.stop_loss_price,
+        take_profit_price=position.take_profit_price,
+        stop_loss_alert=position.stop_loss_alert,
+        take_profit_alert=position.take_profit_alert,
+        holding_days=holding_days,
+        order_result="止损",
+        profit_loss=profit_loss,
+        theoretical_risk_reward_ratio=position.theoretical_risk_reward_ratio,
+        actual_risk_reward_ratio=actual_rrr,
+        notes=position.notes or "",
+        status="closed",
+    )
+
+    position.shares = remaining_shares
+    position.buy_commission = remaining_buy_commission
+    position.commission = remaining_buy_commission
     position.updated_at = close_time
-    
+
+    db.add(closed_trade)
+
     await db.commit()
-    await db.refresh(position)
+    await db.refresh(closed_trade)
     
     strategy = await _get_stock_strategy(db, current_user, position.strategy_id)
     start_date = position.open_time.date() if position.open_time else close_time.date()
     await recalculate_strategy_capital_history(db, current_user.id, strategy.id, start_date)
     
-    # 准备返回数据
-    pos_dict = position.__dict__.copy()
-    # 理论风险回报比保持不变
-    pos_dict['risk_reward_ratio'] = position.theoretical_risk_reward_ratio  # 兼容旧版
-    pos_dict['theoretical_risk_reward_ratio'] = position.theoretical_risk_reward_ratio
-    pos_dict['actual_risk_reward_ratio'] = actual_rrr
-    
-    return TradeResponse(**pos_dict)
+    trade_dict = closed_trade.__dict__.copy()
+    trade_dict['risk_reward_ratio'] = closed_trade.theoretical_risk_reward_ratio
+    trade_dict['theoretical_risk_reward_ratio'] = closed_trade.theoretical_risk_reward_ratio
+    trade_dict['actual_risk_reward_ratio'] = closed_trade.actual_risk_reward_ratio
+
+    return TradeResponse(**trade_dict)

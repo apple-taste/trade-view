@@ -345,12 +345,20 @@ export default function PositionPanel() {
       position.stock_code,
       position.stock_name,
       position.current_price,
-      position.take_profit_price
+      position.take_profit_price,
+      undefined,
+      position.shares,
+      position.shares
     );
+    const nextShares = result?.shares ? parseInt(result.shares, 10) : undefined;
+    const isPartial = nextShares != null && Number.isFinite(nextShares) && nextShares > 0 && nextShares < position.shares;
     if (result && result.price && !isNaN(parseFloat(result.price))) {
-      // 乐观更新：先从列表中移除
       const originalPositions = [...positions];
-      setPositions(prev => prev.filter(p => p.id !== position.id));
+      if (isPartial && nextShares != null) {
+        setPositions(prev => prev.map(p => (p.id === position.id ? { ...p, shares: p.shares - nextShares } : p)));
+      } else {
+        setPositions(prev => prev.filter(p => p.id !== position.id));
+      }
 
       try {
         const requestData: any = {
@@ -360,10 +368,16 @@ export default function PositionPanel() {
         if (result.date) {
           requestData.close_date = result.date;
         }
+        if (nextShares != null && Number.isFinite(nextShares)) {
+          requestData.shares = nextShares;
+        }
         await axios.post(`/api/positions/${position.id}/take-profit`, requestData);
         
-        // 清除该股票的所有价格提醒（平仓后不再需要提醒）
-        clearAlertsByStockCode(position.stock_code);
+        if (!isPartial) {
+          clearAlertsByStockCode(position.stock_code);
+        } else {
+          await fetchPositions();
+        }
         
         // fetchPositions(); // 不需要重新加载
         // 刷新相关面板
@@ -385,12 +399,20 @@ export default function PositionPanel() {
       position.stock_code,
       position.stock_name,
       position.current_price,
-      position.stop_loss_price
+      position.stop_loss_price,
+      undefined,
+      position.shares,
+      position.shares
     );
+    const nextShares = result?.shares ? parseInt(result.shares, 10) : undefined;
+    const isPartial = nextShares != null && Number.isFinite(nextShares) && nextShares > 0 && nextShares < position.shares;
     if (result && result.price && !isNaN(parseFloat(result.price))) {
-      // 乐观更新：先从列表中移除
       const originalPositions = [...positions];
-      setPositions(prev => prev.filter(p => p.id !== position.id));
+      if (isPartial && nextShares != null) {
+        setPositions(prev => prev.map(p => (p.id === position.id ? { ...p, shares: p.shares - nextShares } : p)));
+      } else {
+        setPositions(prev => prev.filter(p => p.id !== position.id));
+      }
 
       try {
         const requestData: any = {
@@ -400,10 +422,16 @@ export default function PositionPanel() {
         if (result.date) {
           requestData.close_date = result.date;
         }
+        if (nextShares != null && Number.isFinite(nextShares)) {
+          requestData.shares = nextShares;
+        }
         await axios.post(`/api/positions/${position.id}/stop-loss`, requestData);
         
-        // 清除该股票的所有价格提醒（平仓后不再需要提醒）
-        clearAlertsByStockCode(position.stock_code);
+        if (!isPartial) {
+          clearAlertsByStockCode(position.stock_code);
+        } else {
+          await fetchPositions();
+        }
         
         // fetchPositions(); // 不需要重新加载
         // 刷新相关面板

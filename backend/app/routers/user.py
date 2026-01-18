@@ -526,6 +526,7 @@ async def get_capital_history(
         query = select(CapitalHistory).where(CapitalHistory.user_id == current_user.id)
     else:
         strategy = await _get_stock_strategy(db, current_user, strategy_id)
+        await _ensure_strategy_capital_history_uptodate(db, current_user.id, strategy.id)
         query = select(StrategyCapitalHistory).where(
             StrategyCapitalHistory.user_id == current_user.id,
             StrategyCapitalHistory.strategy_id == strategy.id,
@@ -707,6 +708,7 @@ async def get_current_total_assets(db: AsyncSession, user_id: int, strategy_id: 
         )
         latest_record = result.scalar_one_or_none()
     else:
+        await _ensure_strategy_capital_history_uptodate(db, user_id, int(strategy_id))
         result = await db.execute(
             select(StrategyCapitalHistory)
             .where(
@@ -731,6 +733,8 @@ async def get_current_total_assets(db: AsyncSession, user_id: int, strategy_id: 
             .where(
                 Trade.user_id == user_id,
                 Trade.status == "open",
+                Trade.close_time.is_(None),
+                Trade.sell_price.is_(None),
                 Trade.is_deleted == False
             )
         )
@@ -741,6 +745,8 @@ async def get_current_total_assets(db: AsyncSession, user_id: int, strategy_id: 
                 Trade.user_id == user_id,
                 Trade.strategy_id == strategy_id,
                 Trade.status == "open",
+                Trade.close_time.is_(None),
+                Trade.sell_price.is_(None),
                 Trade.is_deleted == False
             )
         )
@@ -853,8 +859,7 @@ async def recalculate_strategy_capital_history(db: AsyncSession, user_id: int, s
 
     anchor_date = strategy.initial_date
     initial_capital = float(strategy.initial_capital) if strategy.initial_capital is not None else 100000.0
-    if start_date < anchor_date:
-        start_date = anchor_date
+    start_date = anchor_date
 
     result = await db.execute(
         select(StrategyCapitalHistory).where(
@@ -902,12 +907,11 @@ async def recalculate_strategy_capital_history(db: AsyncSession, user_id: int, s
                 Trade.open_time.isnot(None),
                 func.date(Trade.open_time) <= prev_date,
                 or_(
-                    Trade.status == "open",
                     and_(
-                        Trade.status == "closed",
                         Trade.close_time.isnot(None),
                         func.date(Trade.close_time) > prev_date,
                     ),
+                    Trade.close_time.is_(None),
                 ),
             )
         )
@@ -924,7 +928,6 @@ async def recalculate_strategy_capital_history(db: AsyncSession, user_id: int, s
             or_(
                 func.date(Trade.open_time) >= start_date,
                 and_(
-                    Trade.status == "closed",
                     Trade.close_time.isnot(None),
                     func.date(Trade.close_time) >= start_date
                 )
@@ -939,10 +942,14 @@ async def recalculate_strategy_capital_history(db: AsyncSession, user_id: int, s
         open_date = trade.open_time.date()
         if open_date >= start_date:
             trade_events.append({'date': open_date, 'time': trade.open_time, 'type': 'open', 'trade': trade})
-        if trade.status == "closed" and trade.close_time:
-            close_date = trade.close_time.date()
-            if close_date >= start_date:
-                trade_events.append({'date': close_date, 'time': trade.close_time, 'type': 'close', 'trade': trade})
+        if trade.sell_price is not None:
+            close_dt = trade.close_time or trade.updated_at or trade.open_time
+            if close_dt is not None and trade.open_time is not None and close_dt < trade.open_time:
+                close_dt = trade.open_time
+            if close_dt is not None:
+                close_date = close_dt.date()
+                if close_date >= start_date:
+                    trade_events.append({'date': close_date, 'time': close_dt, 'type': 'close', 'trade': trade})
     trade_events.sort(key=lambda x: (x['date'], x['time']))
 
     capital_records: dict[date, tuple[float, float, float]] = {}
@@ -989,9 +996,8 @@ async def recalculate_strategy_capital_history(db: AsyncSession, user_id: int, s
             buy_commission = trade.buy_commission if trade.buy_commission is not None else (trade.commission or 0)
             cost = trade.buy_price * trade.shares + buy_commission
             available_funds -= cost
-            position_value += trade.buy_price * trade.shares
             positions[trade.id] = trade
-        elif event['type'] == 'close' and trade.sell_price:
+        elif event['type'] == 'close' and trade.sell_price is not None:
             if trade.profit_loss is not None:
                 buy_commission = trade.buy_commission if trade.buy_commission is not None else (trade.commission or 0)
                 buy_cost = trade.buy_price * trade.shares + buy_commission
@@ -1007,9 +1013,8 @@ async def recalculate_strategy_capital_history(db: AsyncSession, user_id: int, s
                         trade.stock_code
                     )
                 available_funds += sell_amount - sell_commission
-            if trade.id in positions:
-                position_value -= trade.buy_price * trade.shares
-                positions.pop(trade.id, None)
+            positions.pop(trade.id, None)
+        position_value = sum((t.buy_price or 0) * (t.shares or 0) for t in positions.values())
         total_assets = available_funds + position_value
         capital_records[trade_date] = (available_funds, position_value, total_assets)
 
@@ -1127,15 +1132,19 @@ async def recalculate_capital_history(db: AsyncSession, user_id: int, start_date
             })
         
         # 平仓事件（如果平仓日期 >= start_date）
-        if trade.status == "closed" and trade.close_time:
-            close_date = trade.close_time.date()
-            if close_date >= start_date:
-                trade_events.append({
-                    'date': close_date,
-                    'time': trade.close_time,
-                    'type': 'close',
-                    'trade': trade
-                })
+        if trade.sell_price is not None:
+            close_dt = trade.close_time or trade.updated_at or trade.open_time
+            if close_dt is not None and trade.open_time is not None and close_dt < trade.open_time:
+                close_dt = trade.open_time
+            if close_dt is not None:
+                close_date = close_dt.date()
+                if close_date >= start_date:
+                    trade_events.append({
+                        'date': close_date,
+                        'time': close_dt,
+                        'type': 'close',
+                        'trade': trade
+                    })
     
     # 按时间排序所有事件（同花顺模式）
     trade_events.sort(key=lambda x: (x['date'], x['time']))
@@ -1278,6 +1287,64 @@ async def recalculate_capital_history(db: AsyncSession, user_id: int, start_date
             await db.delete(record)
     
     await db.commit()
+
+async def _ensure_strategy_capital_history_uptodate(db: AsyncSession, user_id: int, strategy_id: int) -> None:
+    latest_result = await db.execute(
+        select(StrategyCapitalHistory)
+        .where(
+            StrategyCapitalHistory.user_id == user_id,
+            StrategyCapitalHistory.strategy_id == strategy_id,
+        )
+        .order_by(StrategyCapitalHistory.date.desc())
+        .limit(1)
+    )
+    latest = latest_result.scalar_one_or_none()
+
+    last_trade_dt_result = await db.execute(
+        select(func.max(Trade.open_time), func.max(Trade.close_time)).where(
+            Trade.user_id == user_id,
+            Trade.strategy_id == strategy_id,
+            Trade.is_deleted == False,
+        )
+    )
+    max_open_dt, max_close_dt = last_trade_dt_result.one()
+    last_event_date: date | None = None
+    for dt in (max_open_dt, max_close_dt):
+        if dt is None:
+            continue
+        d = dt.date()
+        if last_event_date is None or d > last_event_date:
+            last_event_date = d
+
+    if last_event_date is None and latest is None:
+        return
+
+    should_recalc = False
+    if latest is None:
+        should_recalc = True
+    elif last_event_date is not None and latest.date < last_event_date:
+        should_recalc = True
+    else:
+        open_positions_result = await db.execute(
+            select(func.count(Trade.id)).where(
+                Trade.user_id == user_id,
+                Trade.strategy_id == strategy_id,
+                Trade.is_deleted == False,
+                Trade.status == "open",
+                Trade.close_time.is_(None),
+                Trade.sell_price.is_(None),
+            )
+        )
+        open_count = int(open_positions_result.scalar() or 0)
+        latest_pos_val = float(latest.position_value or 0.0) if latest is not None else 0.0
+        if open_count == 0 and latest_pos_val > 1e-6:
+            should_recalc = True
+
+    if not should_recalc:
+        return
+
+    start_date = latest.date if latest is not None else (last_event_date or date.today())
+    await recalculate_strategy_capital_history(db, user_id, strategy_id, start_date)
 
 @router.get("/strategies", response_model=list[StrategyResponse], summary="获取策略列表")
 async def list_strategies(
