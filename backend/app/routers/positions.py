@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, tuple_
 from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 
@@ -135,15 +135,57 @@ async def get_positions(
                 position.current_price = position.buy_price
                 position.price_source = "成本价"
     
-    # 扩展TradeResponse以包含price_source
-    result = []
+    position_keys: list[tuple[str, datetime, float]] = []
     for pos in positions:
+        if pos.stock_code and pos.open_time and pos.buy_price is not None:
+            position_keys.append((pos.stock_code, pos.open_time, float(pos.buy_price)))
+
+    partial_close_groups: dict[tuple[str, datetime, float], list[Trade]] = {}
+    if position_keys:
+        closed_result = await db.execute(
+            select(Trade)
+            .where(
+                Trade.user_id == current_user.id,
+                Trade.strategy_id == strategy.id,
+                Trade.status == "closed",
+                Trade.is_deleted == False,
+                tuple_(Trade.stock_code, Trade.open_time, Trade.buy_price).in_(position_keys),
+            )
+            .order_by(Trade.close_time.asc())
+        )
+        closed_trades = closed_result.scalars().all()
+        for t in closed_trades:
+            if t.stock_code and t.open_time and t.buy_price is not None:
+                key = (t.stock_code, t.open_time, float(t.buy_price))
+                partial_close_groups.setdefault(key, []).append(t)
+
+    items: list[TradeResponse] = []
+    for pos in positions:
+        key = (pos.stock_code, pos.open_time, float(pos.buy_price)) if pos.stock_code and pos.open_time and pos.buy_price is not None else None
+        partial_closes = partial_close_groups.get(key, []) if key is not None else []
+        closed_shares = sum(int(t.shares or 0) for t in partial_closes)
+        opened_shares = int(pos.shares or 0) + closed_shares
+
         pos_dict = pos.__dict__.copy()
-        if getattr(pos, "price_source", None):
-            pos_dict["price_source"] = getattr(pos, "price_source", None)
-        result.append(TradeResponse(**pos_dict))
-    
-    return result
+        pos_dict["price_source"] = getattr(pos, "price_source", None)
+        pos_dict["opened_shares"] = opened_shares if opened_shares > 0 else None
+        pos_dict["closed_shares"] = closed_shares if closed_shares > 0 else 0
+        pos_dict["partial_closes"] = [
+            {
+                "id": t.id,
+                "close_time": t.close_time,
+                "shares": t.shares,
+                "sell_price": t.sell_price,
+                "order_result": t.order_result,
+                "profit_loss": t.profit_loss,
+                "commission": t.commission,
+            }
+            for t in partial_closes
+            if t.close_time is not None
+        ]
+        items.append(TradeResponse(**pos_dict))
+
+    return items
 
 @router.put("/{position_id}", response_model=TradeResponse)
 async def update_position(

@@ -6,11 +6,24 @@ import { useAlerts } from '../../contexts/AlertContext';
 import { useJojoPriceModal } from '../JojoPriceModal';
 import { perfMonitor } from '../../utils/performance';
 
+interface PartialCloseRecord {
+  id: number;
+  close_time?: string;
+  shares: number;
+  sell_price?: number;
+  order_result?: string;
+  profit_loss?: number;
+  commission?: number;
+}
+
 interface Position {
   id: number;
   stock_code: string;
   stock_name?: string;
   shares: number;
+  opened_shares?: number;
+  closed_shares?: number;
+  partial_closes?: PartialCloseRecord[];
   buy_price: number;
   commission?: number; // 手续费
   current_price?: number;
@@ -48,6 +61,24 @@ export default function PositionPanel() {
   } = useTrade();
   const { addAlert, clearAlertsByStockCode } = useAlerts();
 
+  const formatDate = (value?: string) => {
+    if (!value) return '';
+    const dt = new Date(value);
+    if (Number.isNaN(dt.getTime())) return value;
+    return dt.toLocaleDateString('zh-CN');
+  };
+
+  const calc334Shares = (totalShares: number) => {
+    if (!Number.isFinite(totalShares) || totalShares <= 0) return { a: 0, b: 0, c: 0 };
+    const total = Math.floor(totalShares / 100) * 100;
+    const aBase = Math.floor((total * 3) / 10 / 100) * 100;
+    const bBase = Math.floor((total * 3) / 10 / 100) * 100;
+    const cBase = Math.max(0, total - aBase - bBase);
+    const c = Math.floor(cBase / 100) * 100;
+    const remainder = total - (aBase + bBase + c);
+    return { a: aBase, b: bBase, c: c + remainder };
+  };
+
   // 监听新增交易，实现增量更新
   useEffect(() => {
     if (lastAddedTrade) {
@@ -69,6 +100,9 @@ export default function PositionPanel() {
           stock_code: lastAddedTrade.stock_code,
           stock_name: lastAddedTrade.stock_name,
           shares: lastAddedTrade.shares,
+          opened_shares: lastAddedTrade.shares,
+          closed_shares: 0,
+          partial_closes: [],
           buy_price: lastAddedTrade.buy_price,
           commission: lastAddedTrade.commission,
           current_price: lastAddedTrade.current_price || lastAddedTrade.buy_price, // 初始使用买入价
@@ -536,6 +570,9 @@ export default function PositionPanel() {
             const profit = calculateProfit(position);
             const profitPercent = profit ? ((position.current_price! - position.buy_price) / position.buy_price * 100) : null;
             const actualSingleLoss = calculateActualSingleLoss(position);
+            const openedShares = position.opened_shares ?? position.shares;
+            const closedShares = position.closed_shares ?? 0;
+            const ratio334 = calc334Shares(openedShares);
 
             return (
               <div key={position.id} className="border border-jojo-gold rounded p-2 bg-jojo-blue-light">
@@ -563,7 +600,7 @@ export default function PositionPanel() {
                       <span className="text-gray-400">持仓天数:</span> {position.holding_days} 天
                     </div>
                     <div>
-                      <span className="text-gray-400">股数:</span> {position.shares}
+                      <span className="text-gray-400">剩余股数:</span> {position.shares}
                     </div>
                     <div>
                       <span className="text-gray-400">买入价:</span> ¥{position.buy_price.toFixed(2)}
@@ -571,11 +608,48 @@ export default function PositionPanel() {
                     <div>
                       <span className="text-gray-400">市值:</span> {position.current_price ? `¥${(position.current_price * position.shares).toFixed(2)}` : '获取中...'}
                     </div>
+                    <div>
+                      <span className="text-gray-400">开仓股数:</span> {openedShares}
+                    </div>
+                    <div>
+                      <span className="text-gray-400">已平仓股数:</span> {closedShares}
+                    </div>
+                    <div className="xl:col-span-2">
+                      <span className="text-gray-400">3:3:4参考股数:</span> {ratio334.a}/{ratio334.b}/{ratio334.c}
+                    </div>
                     <div className="xl:col-span-2">
                       <span className="text-gray-400">实际单笔损失:</span>{' '}
                       {actualSingleLoss != null ? `¥${actualSingleLoss.toFixed(2)}` : '未设置止损'}
                     </div>
                   </div>
+                  {position.partial_closes && position.partial_closes.length > 0 && (
+                    <div className="mt-1 p-1.5 bg-jojo-blue rounded border border-jojo-gold text-xs text-gray-300">
+                      <div className="flex items-center justify-between text-gray-400 mb-1">
+                        <span>分段平仓记录</span>
+                        <span>{position.partial_closes.length} 笔</span>
+                      </div>
+                      <div className="space-y-1">
+                        {position.partial_closes.map((pc) => {
+                          const sideLabel = pc.order_result || '平仓';
+                          const priceText = typeof pc.sell_price === 'number' ? `¥${pc.sell_price.toFixed(2)}` : '';
+                          const pnlText =
+                            typeof pc.profit_loss === 'number'
+                              ? `${pc.profit_loss >= 0 ? '+' : ''}${pc.profit_loss.toFixed(2)}`
+                              : '';
+                          return (
+                            <div key={pc.id} className="flex items-center justify-between gap-2">
+                              <div className="truncate">
+                                {formatDate(pc.close_time)} {sideLabel} {pc.shares}股
+                              </div>
+                              <div className="shrink-0 text-right">
+                                {priceText}{priceText && pnlText ? ' ' : ''}{pnlText}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
                   {/* 当前市场价格 */}
                   <div className="mt-1 p-1 bg-jojo-blue rounded border border-jojo-gold">

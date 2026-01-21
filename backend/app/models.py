@@ -242,6 +242,15 @@ class TradeUpdate(BaseModel):
     status: Optional[str] = None
     strategy_id: Optional[int] = None
 
+class PartialCloseRecord(BaseModel):
+    id: int
+    close_time: Optional[datetime]
+    shares: int
+    sell_price: Optional[float] = None
+    order_result: Optional[str] = None
+    profit_loss: Optional[float] = None
+    commission: Optional[float] = None
+
 class TradeResponse(BaseModel):
     id: int
     user_id: int
@@ -270,6 +279,9 @@ class TradeResponse(BaseModel):
     actual_risk_reward_ratio: Optional[float] = None  # 实际风险回报比
     price_source: Optional[str] = None  # 价格来源
     profit_loss: Optional[float] = None  # 盈亏金额
+    opened_shares: Optional[int] = None
+    closed_shares: Optional[int] = None
+    partial_closes: Optional[List[PartialCloseRecord]] = None
     created_at: datetime
     updated_at: datetime
 
