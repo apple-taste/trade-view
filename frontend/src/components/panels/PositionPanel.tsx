@@ -483,9 +483,13 @@ export default function PositionPanel() {
 
   const calculateProfit = (position: Position) => {
     if (!position.current_price) return null;
-    // 盈亏计算：(当前价格 - 买入价格) * 手数 - 手续费
-    const profit = (position.current_price - position.buy_price) * position.shares - (position.commission || 0);
-    return profit;
+    const realizedProfit =
+      position.partial_closes?.reduce((sum, close) => sum + (typeof close.profit_loss === 'number' ? close.profit_loss : 0), 0) || 0;
+
+    const unrealizedProfit =
+      (position.current_price - position.buy_price) * position.shares - (position.commission || 0);
+
+    return realizedProfit + unrealizedProfit;
   };
 
   const calculateActualSingleLoss = (position: Position) => {
@@ -568,9 +572,10 @@ export default function PositionPanel() {
           <div className="space-y-2 flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-1">
             {positions.map((position) => {
             const profit = calculateProfit(position);
-            const profitPercent = profit ? ((position.current_price! - position.buy_price) / position.buy_price * 100) : null;
-            const actualSingleLoss = calculateActualSingleLoss(position);
             const openedShares = position.opened_shares ?? position.shares;
+            const costBasis = openedShares > 0 ? position.buy_price * openedShares : 0;
+            const profitPercent = profit != null && costBasis > 0 ? (profit / costBasis * 100) : null;
+            const actualSingleLoss = calculateActualSingleLoss(position);
             const closedShares = position.closed_shares ?? 0;
             const ratio334 = calc334Shares(openedShares);
 
