@@ -18,6 +18,7 @@ interface PartialCloseRecord {
 
 interface Position {
   id: number;
+  open_trade_id?: number;
   stock_code: string;
   stock_name?: string;
   shares: number;
@@ -98,6 +99,7 @@ export default function PositionPanel() {
         // 或者我们需要手动映射。由于 Trade 和 Position 结构相似，只需补充缺少的字段。
         const newPosition: Position = {
           id: lastAddedTrade.id,
+          open_trade_id: lastAddedTrade.open_trade_id ?? lastAddedTrade.id,
           stock_code: lastAddedTrade.stock_code,
           stock_name: lastAddedTrade.stock_name,
           shares: lastAddedTrade.shares,
@@ -482,16 +484,18 @@ export default function PositionPanel() {
     }
   };
 
-  const calculateProfit = (position: Position) => {
-    if (!position.current_price) return null;
-    const realizedProfit =
-      position.partial_closes?.reduce((sum, close) => sum + (typeof close.profit_loss === 'number' ? close.profit_loss : 0), 0) || 0;
+  const calculateRealizedProfit = (position: Position) => {
+    return position.partial_closes?.reduce((sum, close) => sum + (typeof close.profit_loss === 'number' ? close.profit_loss : 0), 0) || 0;
+  };
 
-    const remainingBuyCommission = typeof position.buy_commission === 'number' ? position.buy_commission : (position.commission || 0);
-    const unrealizedProfit =
-      (position.current_price - position.buy_price) * position.shares - remainingBuyCommission;
-
-    return realizedProfit + unrealizedProfit;
+  const calculateRealizedProfitPercent = (position: Position) => {
+    const realizedProfit = calculateRealizedProfit(position);
+    const closedShares =
+      position.partial_closes?.reduce((sum, close) => sum + (Number.isFinite(close.shares) ? close.shares : 0), 0) ??
+      position.closed_shares ??
+      0;
+    const costBasis = closedShares > 0 ? position.buy_price * closedShares : 0;
+    return costBasis > 0 ? (realizedProfit / costBasis) * 100 : null;
   };
 
   const calculateActualSingleLoss = (position: Position) => {
@@ -573,10 +577,9 @@ export default function PositionPanel() {
 
           <div className="space-y-2 flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-1">
             {positions.map((position) => {
-            const profit = calculateProfit(position);
+            const realizedProfit = calculateRealizedProfit(position);
+            const realizedProfitPercent = calculateRealizedProfitPercent(position);
             const openedShares = position.opened_shares ?? position.shares;
-            const costBasis = openedShares > 0 ? position.buy_price * openedShares : 0;
-            const profitPercent = profit != null && costBasis > 0 ? (profit / costBasis * 100) : null;
             const actualSingleLoss = calculateActualSingleLoss(position);
             const closedShares = position.closed_shares ?? 0;
             const ratio334 = calc334Shares(openedShares);
@@ -589,17 +592,19 @@ export default function PositionPanel() {
                     <div className="font-bold text-jojo-gold text-sm">
                       {position.stock_code}
                       {position.stock_name && <span className="text-white"> - {position.stock_name}</span>}
+                      {position.open_trade_id != null && <span className="text-gray-300"> #{position.open_trade_id}</span>}
                     </div>
-                    {profit !== null && (
-                      <div className={`text-right ${profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    <div className={`text-right ${realizedProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        <div className="text-[10px] text-gray-400">平仓盈亏</div>
                         <div className="text-sm font-bold">
-                          {profit >= 0 ? '+' : ''}{profit.toFixed(2)} 元
+                        {realizedProfit >= 0 ? '+' : ''}{realizedProfit.toFixed(2)} 元
                         </div>
                         <div className="text-xs">
-                          {profitPercent !== null && (profitPercent >= 0 ? '+' : '')}{profitPercent?.toFixed(2)}%
+                          {realizedProfitPercent !== null
+                            ? `${realizedProfitPercent >= 0 ? '+' : ''}${realizedProfitPercent.toFixed(2)}%`
+                            : '--'}
                         </div>
-                      </div>
-                    )}
+                    </div>
                   </div>
                   
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-1 text-xs text-gray-300 mb-1">
@@ -608,6 +613,9 @@ export default function PositionPanel() {
                     </div>
                     <div>
                       <span className="text-gray-400">剩余股数:</span> {position.shares}
+                    </div>
+                    <div>
+                      <span className="text-gray-400">开仓ID:</span> {position.open_trade_id ?? position.id}
                     </div>
                     <div>
                       <span className="text-gray-400">买入价:</span> ¥{position.buy_price.toFixed(2)}
