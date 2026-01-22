@@ -17,8 +17,7 @@ def _safe_database_url_for_log(database_url: str) -> str:
         netloc = parts.netloc
         if "@" in netloc:
             userinfo, hostinfo = netloc.rsplit("@", 1)
-            user = userinfo.split(":", 1)[0] if userinfo else ""
-            netloc = f"{user}:***@{hostinfo}"
+            netloc = f"***@{hostinfo}"
         return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
     except Exception:
         return "***"
