@@ -23,6 +23,7 @@ WORKDIR /app
 # 安装系统依赖
 RUN apt-get update && apt-get install -y \
     gcc \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制后端依赖文件
