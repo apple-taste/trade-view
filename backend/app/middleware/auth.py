@@ -3,6 +3,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
+import asyncio
 
 from app.database import get_db, User
 import os
@@ -48,7 +50,11 @@ async def get_current_user(
     except JWTError:
         raise credentials_exception
     
-    result = await db.execute(select(User).where(User.id == user_id))
+    db_timeout_s = float(os.getenv("DB_QUERY_TIMEOUT", "8"))
+    try:
+        result = await asyncio.wait_for(db.execute(select(User).where(User.id == user_id)), timeout=db_timeout_s)
+    except (asyncio.TimeoutError, TimeoutError, SQLAlchemyError):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="数据库暂不可用，请稍后重试")
     user = result.scalar_one_or_none()
     if user is None:
         raise credentials_exception
@@ -78,7 +84,11 @@ async def get_current_admin(
     except JWTError:
         raise credentials_exception
 
-    result = await db.execute(select(User).where(User.id == user_id))
+    db_timeout_s = float(os.getenv("DB_QUERY_TIMEOUT", "8"))
+    try:
+        result = await asyncio.wait_for(db.execute(select(User).where(User.id == user_id)), timeout=db_timeout_s)
+    except (asyncio.TimeoutError, TimeoutError, SQLAlchemyError):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="数据库暂不可用，请稍后重试")
     user = result.scalar_one_or_none()
     if user is None:
         raise credentials_exception

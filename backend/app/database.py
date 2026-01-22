@@ -50,6 +50,7 @@ if DB_TYPE == "PostgreSQL":
             "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", "1800")),
             "pool_size": int(os.getenv("DB_POOL_SIZE", "5")),
             "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "5")),
+            "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT", "10")),
             "connect_args": {"timeout": connect_timeout, "command_timeout": command_timeout},
         }
     )
