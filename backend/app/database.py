@@ -73,9 +73,14 @@ sqlite_engine = create_async_engine(SQLITE_DATABASE_URL, echo=False)
 try:
     from sqlalchemy.ext.asyncio import async_sessionmaker as _async_sessionmaker  # type: ignore
 
-    SqliteSessionLocal = _async_sessionmaker(sqlite_engine, class_=AsyncSession, expire_on_commit=False)
+    def _make_sessionmaker(_engine):
+        return _async_sessionmaker(_engine, class_=AsyncSession, expire_on_commit=False)
 except Exception:
-    SqliteSessionLocal = sessionmaker(bind=sqlite_engine, class_=AsyncSession, expire_on_commit=False)
+
+    def _make_sessionmaker(_engine):
+        return sessionmaker(bind=_engine, class_=AsyncSession, expire_on_commit=False)
+
+SqliteSessionLocal = _make_sessionmaker(sqlite_engine)
 
 if DB_TYPE == "PostgreSQL":
     connect_timeout = int(os.getenv("DB_CONNECT_TIMEOUT", "60"))
@@ -120,13 +125,12 @@ if DB_TYPE == "PostgreSQL":
         }
     )
 
-engine = create_async_engine(DATABASE_URL, **engine_kwargs)  # 关闭echo减少日志
-try:
-    from sqlalchemy.ext.asyncio import async_sessionmaker  # type: ignore
+postgres_engine = create_async_engine(DATABASE_URL, **engine_kwargs)
+PostgresSessionLocal = _make_sessionmaker(postgres_engine)
 
-    AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-except Exception:
-    AsyncSessionLocal = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+if DB_TYPE == "PostgreSQL":
+    engine = postgres_engine
+    AsyncSessionLocal = PostgresSessionLocal
 else:
     engine = sqlite_engine
     AsyncSessionLocal = SqliteSessionLocal
