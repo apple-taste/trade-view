@@ -388,6 +388,9 @@ async def create_trade(
     db.add(new_trade)
 
     try:
+        await db.flush()
+        if new_trade.open_trade_id is None and new_trade.id is not None:
+            new_trade.open_trade_id = new_trade.id
         await db.commit()
     except IntegrityError as e:
         await db.rollback()

@@ -121,9 +121,11 @@ class Trade(Base):
     __table_args__ = (
         Index('idx_user_open_time', 'user_id', 'is_deleted', 'open_time'),
         Index('idx_user_strategy_open_time', 'user_id', 'strategy_id', 'is_deleted', 'open_time'),
+        Index('idx_trades_open_trade_id', 'user_id', 'strategy_id', 'open_trade_id'),
     )
     
     id = Column(Integer, primary_key=True, index=True)
+    open_trade_id = Column(Integer, nullable=True, index=True)
     user_id = Column(Integer, nullable=False, index=True)
     strategy_id = Column(Integer, nullable=True, index=True)
     stock_code = Column(String, nullable=False)
@@ -262,9 +264,15 @@ async def init_db():
                 await conn.exec_driver_sql("ALTER TABLE trades ADD COLUMN strategy_id INTEGER")
             if "client_request_id" not in cols:
                 await conn.exec_driver_sql("ALTER TABLE trades ADD COLUMN client_request_id VARCHAR")
+            if "open_trade_id" not in cols:
+                await conn.exec_driver_sql("ALTER TABLE trades ADD COLUMN open_trade_id INTEGER")
             await conn.exec_driver_sql(
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_trades_user_client_request_id ON trades(user_id, client_request_id) WHERE client_request_id IS NOT NULL"
             )
+            await conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS idx_trades_open_trade_id ON trades(user_id, strategy_id, open_trade_id)"
+            )
+            await conn.exec_driver_sql("UPDATE trades SET open_trade_id = id WHERE open_trade_id IS NULL")
 
             result = await conn.exec_driver_sql("PRAGMA table_info(forex_trades)")
             cols = [row[1] for row in result.fetchall()]
@@ -295,9 +303,14 @@ async def init_db():
             await conn.exec_driver_sql("ALTER TABLE forex_trades ADD COLUMN IF NOT EXISTS strategy_id INTEGER")
             await conn.exec_driver_sql("ALTER TABLE trades ADD COLUMN IF NOT EXISTS client_request_id VARCHAR")
             await conn.exec_driver_sql("ALTER TABLE forex_trades ADD COLUMN IF NOT EXISTS client_request_id VARCHAR")
+            await conn.exec_driver_sql("ALTER TABLE trades ADD COLUMN IF NOT EXISTS open_trade_id INTEGER")
             await conn.exec_driver_sql(
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_trades_user_client_request_id ON trades(user_id, client_request_id) WHERE client_request_id IS NOT NULL"
             )
+            await conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS idx_trades_open_trade_id ON trades(user_id, strategy_id, open_trade_id)"
+            )
+            await conn.exec_driver_sql("UPDATE trades SET open_trade_id = id WHERE open_trade_id IS NULL")
             await conn.exec_driver_sql(
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_forex_trades_user_client_request_id ON forex_trades(user_id, client_request_id) WHERE client_request_id IS NOT NULL"
             )

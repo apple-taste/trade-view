@@ -135,13 +135,24 @@ async def get_positions(
                 position.current_price = position.buy_price
                 position.price_source = "成本价"
     
-    position_keys: list[tuple[str, datetime, float]] = []
-    for pos in positions:
-        if pos.stock_code and pos.open_time and pos.buy_price is not None:
-            position_keys.append((pos.stock_code, pos.open_time, float(pos.buy_price)))
+    open_ids: list[int] = []
+    key_to_open_ids: dict[tuple[str, datetime, float], list[int]] = {}
+    needs_backfill = False
 
-    partial_close_groups: dict[tuple[str, datetime, float], list[Trade]] = {}
-    if position_keys:
+    for pos in positions:
+        if pos.id is None:
+            continue
+        if pos.open_trade_id is None:
+            pos.open_trade_id = pos.id
+            needs_backfill = True
+        open_id = int(pos.open_trade_id or pos.id)
+        open_ids.append(open_id)
+        if pos.stock_code and pos.open_time and pos.buy_price is not None:
+            key = (pos.stock_code, pos.open_time, float(pos.buy_price))
+            key_to_open_ids.setdefault(key, []).append(open_id)
+
+    partial_close_groups: dict[int, list[Trade]] = {}
+    if open_ids:
         closed_result = await db.execute(
             select(Trade)
             .where(
@@ -149,20 +160,51 @@ async def get_positions(
                 Trade.strategy_id == strategy.id,
                 Trade.status == "closed",
                 Trade.is_deleted == False,
-                tuple_(Trade.stock_code, Trade.open_time, Trade.buy_price).in_(position_keys),
+                Trade.open_trade_id.in_(open_ids),
             )
             .order_by(Trade.close_time.asc())
         )
         closed_trades = closed_result.scalars().all()
         for t in closed_trades:
-            if t.stock_code and t.open_time and t.buy_price is not None:
-                key = (t.stock_code, t.open_time, float(t.buy_price))
-                partial_close_groups.setdefault(key, []).append(t)
+            if t.open_trade_id is None:
+                continue
+            partial_close_groups.setdefault(int(t.open_trade_id), []).append(t)
+
+    if key_to_open_ids:
+        position_keys = list(key_to_open_ids.keys())
+        legacy_result = await db.execute(
+            select(Trade)
+            .where(
+                Trade.user_id == current_user.id,
+                Trade.strategy_id == strategy.id,
+                Trade.status == "closed",
+                Trade.is_deleted == False,
+                tuple_(Trade.stock_code, Trade.open_time, Trade.buy_price).in_(position_keys),
+                (Trade.open_trade_id.is_(None)) | (Trade.open_trade_id == Trade.id),
+            )
+            .order_by(Trade.close_time.asc())
+        )
+        legacy_trades = legacy_result.scalars().all()
+        for t in legacy_trades:
+            if not (t.stock_code and t.open_time and t.buy_price is not None):
+                continue
+            key = (t.stock_code, t.open_time, float(t.buy_price))
+            open_id_candidates = key_to_open_ids.get(key, [])
+            if len(open_id_candidates) != 1:
+                continue
+            open_id = open_id_candidates[0]
+            if t.open_trade_id != open_id:
+                t.open_trade_id = open_id
+                needs_backfill = True
+            partial_close_groups.setdefault(open_id, []).append(t)
+
+    if needs_backfill:
+        await db.commit()
 
     items: list[TradeResponse] = []
     for pos in positions:
-        key = (pos.stock_code, pos.open_time, float(pos.buy_price)) if pos.stock_code and pos.open_time and pos.buy_price is not None else None
-        partial_closes = partial_close_groups.get(key, []) if key is not None else []
+        open_id = int(pos.open_trade_id or pos.id)
+        partial_closes = partial_close_groups.get(open_id, [])
         closed_shares = sum(int(t.shares or 0) for t in partial_closes)
         opened_shares = int(pos.shares or 0) + closed_shares
 
@@ -310,6 +352,9 @@ async def take_profit(
         if risk > 0:
             actual_rrr = round(actual_reward / risk, 2)
 
+    if position.open_trade_id is None and position.id is not None:
+        position.open_trade_id = position.id
+
     if shares_to_close == position.shares:
         position.close_time = close_time
         position.sell_price = request.sell_price
@@ -346,6 +391,7 @@ async def take_profit(
     remaining_buy_commission = round(original_buy_commission - closed_buy_commission, 6)
 
     closed_trade = Trade(
+        open_trade_id=int(position.open_trade_id or position.id),
         user_id=position.user_id,
         strategy_id=position.strategy_id,
         stock_code=position.stock_code,
@@ -467,6 +513,9 @@ async def stop_loss(
         if actual_risk > 0:
             actual_rrr = round(theoretical_reward / actual_risk, 2)
 
+    if position.open_trade_id is None and position.id is not None:
+        position.open_trade_id = position.id
+
     if shares_to_close == position.shares:
         position.close_time = close_time
         position.sell_price = request.sell_price
@@ -497,6 +546,7 @@ async def stop_loss(
     remaining_buy_commission = round(original_buy_commission - closed_buy_commission, 6)
 
     closed_trade = Trade(
+        open_trade_id=int(position.open_trade_id or position.id),
         user_id=position.user_id,
         strategy_id=position.strategy_id,
         stock_code=position.stock_code,

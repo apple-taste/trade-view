@@ -26,6 +26,7 @@ interface Position {
   partial_closes?: PartialCloseRecord[];
   buy_price: number;
   commission?: number; // 手续费
+  buy_commission?: number; // 剩余买入手续费
   current_price?: number;
   price_source?: string; // 价格来源
   stop_loss_price?: number;
@@ -486,8 +487,9 @@ export default function PositionPanel() {
     const realizedProfit =
       position.partial_closes?.reduce((sum, close) => sum + (typeof close.profit_loss === 'number' ? close.profit_loss : 0), 0) || 0;
 
+    const remainingBuyCommission = typeof position.buy_commission === 'number' ? position.buy_commission : (position.commission || 0);
     const unrealizedProfit =
-      (position.current_price - position.buy_price) * position.shares - (position.commission || 0);
+      (position.current_price - position.buy_price) * position.shares - remainingBuyCommission;
 
     return realizedProfit + unrealizedProfit;
   };

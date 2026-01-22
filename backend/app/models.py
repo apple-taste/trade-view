@@ -253,6 +253,7 @@ class PartialCloseRecord(BaseModel):
 
 class TradeResponse(BaseModel):
     id: int
+    open_trade_id: Optional[int] = None
     user_id: int
     strategy_id: Optional[int] = None
     stock_code: str
