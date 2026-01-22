@@ -4,10 +4,24 @@ from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, 
 from datetime import datetime
 import os
 from pathlib import Path
+import ssl as ssl_module
+from urllib.parse import urlsplit, urlunsplit
 
 # 数据库配置：支持PostgreSQL和SQLite
 # 优先使用PostgreSQL（生产环境），如果没有配置则使用SQLite（本地开发）
 DATABASE_URL = os.getenv("DATABASE_URL")
+
+def _safe_database_url_for_log(database_url: str) -> str:
+    try:
+        parts = urlsplit(database_url)
+        netloc = parts.netloc
+        if "@" in netloc:
+            userinfo, hostinfo = netloc.rsplit("@", 1)
+            user = userinfo.split(":", 1)[0] if userinfo else ""
+            netloc = f"{user}:***@{hostinfo}"
+        return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    except Exception:
+        return "***"
 
 if DATABASE_URL:
     # 使用PostgreSQL（生产环境）
@@ -21,7 +35,7 @@ if DATABASE_URL:
         DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
     
     print(f"📦 [数据库] 使用PostgreSQL数据库")
-    print(f"📦 [数据库] DATABASE_URL: {DATABASE_URL.split('@')[0]}@***")  # 隐藏密码
+    print(f"📦 [数据库] DATABASE_URL: {_safe_database_url_for_log(DATABASE_URL)}")
     DB_TYPE = "PostgreSQL"
 else:
     # 使用SQLite（本地开发）
@@ -42,16 +56,35 @@ else:
 
 engine_kwargs = {"echo": False}
 if DB_TYPE == "PostgreSQL":
-    connect_timeout = int(os.getenv("DB_CONNECT_TIMEOUT", "10"))
+    connect_timeout = int(os.getenv("DB_CONNECT_TIMEOUT", "30"))
     command_timeout = int(os.getenv("DB_COMMAND_TIMEOUT", "60"))
+    connect_args = {"timeout": connect_timeout, "command_timeout": command_timeout}
+
+    db_ssl = os.getenv("DB_SSL", "auto").strip().lower()
+    if db_ssl not in {"0", "false", "no", "disable", "disabled"}:
+        ssl_context = None
+        if db_ssl in {"1", "true", "yes", "require", "required"}:
+            ssl_context = ssl_module.create_default_context()
+        else:
+            node_env = os.getenv("NODE_ENV", "").strip().lower()
+            host = ""
+            try:
+                host = urlsplit(DATABASE_URL).hostname or ""
+            except Exception:
+                host = ""
+            if node_env == "production" or host.endswith("supabase.co"):
+                ssl_context = ssl_module.create_default_context()
+        if ssl_context is not None:
+            connect_args["ssl"] = ssl_context
+
     engine_kwargs.update(
         {
             "pool_pre_ping": True,
             "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", "1800")),
             "pool_size": int(os.getenv("DB_POOL_SIZE", "5")),
             "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "5")),
-            "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT", "10")),
-            "connect_args": {"timeout": connect_timeout, "command_timeout": command_timeout},
+            "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT", "30")),
+            "connect_args": connect_args,
         }
     )
 
