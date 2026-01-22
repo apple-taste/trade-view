@@ -1,11 +1,12 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import declarative_base, sessionmaker
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, Date, UniqueConstraint, Index
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, Date, UniqueConstraint, Index, text
 from datetime import datetime
 import os
 from pathlib import Path
 import ssl as ssl_module
 from urllib.parse import urlsplit, urlunsplit
+import asyncio
 
 # 数据库配置：支持PostgreSQL和SQLite
 # 优先使用PostgreSQL（生产环境），如果没有配置则使用SQLite（本地开发）
@@ -53,7 +54,25 @@ else:
         print(f"📦 [数据库] 数据库文件大小: {file_size} 字节")
     DB_TYPE = "SQLite"
 
+DB_DIR = Path(os.getenv("DB_DIR", "."))
+DB_DIR.mkdir(parents=True, exist_ok=True)
+SQLITE_DATABASE_PATH = DB_DIR / "database.db"
+SQLITE_DATABASE_URL = f"sqlite+aiosqlite:///{SQLITE_DATABASE_PATH}"
+
+_fallback_to_sqlite = (os.getenv("DB_FALLBACK_TO_SQLITE", "true") or "").strip().lower() in {"1", "true", "yes", "on"}
+_active_db_type = DB_TYPE
+_sqlite_initialized = False
+_sqlite_init_lock = asyncio.Lock()
+
 engine_kwargs = {"echo": False}
+sqlite_engine = create_async_engine(SQLITE_DATABASE_URL, echo=False)
+try:
+    from sqlalchemy.ext.asyncio import async_sessionmaker as _async_sessionmaker  # type: ignore
+
+    SqliteSessionLocal = _async_sessionmaker(sqlite_engine, class_=AsyncSession, expire_on_commit=False)
+except Exception:
+    SqliteSessionLocal = sessionmaker(bind=sqlite_engine, class_=AsyncSession, expire_on_commit=False)
+
 if DB_TYPE == "PostgreSQL":
     connect_timeout = int(os.getenv("DB_CONNECT_TIMEOUT", "60"))
     command_timeout = int(os.getenv("DB_COMMAND_TIMEOUT", "60"))
@@ -104,6 +123,9 @@ try:
     AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 except Exception:
     AsyncSessionLocal = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+else:
+    engine = sqlite_engine
+    AsyncSessionLocal = SqliteSessionLocal
 
 Base = declarative_base()
 
@@ -292,88 +314,121 @@ class ForexTrade(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+async def _init_schema(conn, db_type: str) -> None:
+    await conn.run_sync(Base.metadata.create_all)
+    if db_type == "SQLite":
+        result = await conn.exec_driver_sql("PRAGMA table_info(users)")
+        cols = [row[1] for row in result.fetchall()]
+        if "is_admin" not in cols:
+            await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT 0")
+        if "last_login_at" not in cols:
+            await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN last_login_at DATETIME")
+        if "is_paid" not in cols:
+            await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN is_paid BOOLEAN DEFAULT 0")
+        if "paid_until" not in cols:
+            await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN paid_until DATE")
+        if "plan" not in cols:
+            await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN plan VARCHAR DEFAULT 'free'")
+        if "total_paid" not in cols:
+            await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN total_paid FLOAT DEFAULT 0")
+
+        result = await conn.exec_driver_sql("PRAGMA table_info(trades)")
+        cols = [row[1] for row in result.fetchall()]
+        if "strategy_id" not in cols:
+            await conn.exec_driver_sql("ALTER TABLE trades ADD COLUMN strategy_id INTEGER")
+        if "client_request_id" not in cols:
+            await conn.exec_driver_sql("ALTER TABLE trades ADD COLUMN client_request_id VARCHAR")
+        if "open_trade_id" not in cols:
+            await conn.exec_driver_sql("ALTER TABLE trades ADD COLUMN open_trade_id INTEGER")
+        await conn.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_trades_user_client_request_id ON trades(user_id, client_request_id) WHERE client_request_id IS NOT NULL"
+        )
+        await conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS idx_trades_open_trade_id ON trades(user_id, strategy_id, open_trade_id)"
+        )
+        await conn.exec_driver_sql("UPDATE trades SET open_trade_id = id WHERE open_trade_id IS NULL")
+
+        result = await conn.exec_driver_sql("PRAGMA table_info(forex_trades)")
+        cols = [row[1] for row in result.fetchall()]
+        if "strategy_id" not in cols:
+            await conn.exec_driver_sql("ALTER TABLE forex_trades ADD COLUMN strategy_id INTEGER")
+        if "client_request_id" not in cols:
+            await conn.exec_driver_sql("ALTER TABLE forex_trades ADD COLUMN client_request_id VARCHAR")
+        await conn.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_forex_trades_user_client_request_id ON forex_trades(user_id, client_request_id) WHERE client_request_id IS NOT NULL"
+        )
+
+        result = await conn.exec_driver_sql("PRAGMA table_info(forex_accounts)")
+        cols = [row[1] for row in result.fetchall()]
+        if "initial_balance" not in cols:
+            await conn.exec_driver_sql(
+                "ALTER TABLE forex_accounts ADD COLUMN initial_balance FLOAT DEFAULT 10000"
+            )
+            await conn.exec_driver_sql(
+                "UPDATE forex_accounts SET initial_balance = COALESCE(initial_balance, balance, 10000)"
+            )
+        if "initial_date" not in cols:
+            await conn.exec_driver_sql("ALTER TABLE forex_accounts ADD COLUMN initial_date DATE")
+            await conn.exec_driver_sql(
+                "UPDATE forex_accounts SET initial_date = COALESCE(initial_date, DATE(created_at), DATE('now'))"
+            )
+        return
+
+    await conn.exec_driver_sql("ALTER TABLE trades ADD COLUMN IF NOT EXISTS strategy_id INTEGER")
+    await conn.exec_driver_sql("ALTER TABLE forex_trades ADD COLUMN IF NOT EXISTS strategy_id INTEGER")
+    await conn.exec_driver_sql("ALTER TABLE trades ADD COLUMN IF NOT EXISTS client_request_id VARCHAR")
+    await conn.exec_driver_sql("ALTER TABLE forex_trades ADD COLUMN IF NOT EXISTS client_request_id VARCHAR")
+    await conn.exec_driver_sql("ALTER TABLE trades ADD COLUMN IF NOT EXISTS open_trade_id INTEGER")
+    await conn.exec_driver_sql(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_trades_user_client_request_id ON trades(user_id, client_request_id) WHERE client_request_id IS NOT NULL"
+    )
+    await conn.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS idx_trades_open_trade_id ON trades(user_id, strategy_id, open_trade_id)"
+    )
+    await conn.exec_driver_sql("UPDATE trades SET open_trade_id = id WHERE open_trade_id IS NULL")
+    await conn.exec_driver_sql(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_forex_trades_user_client_request_id ON forex_trades(user_id, client_request_id) WHERE client_request_id IS NOT NULL"
+    )
+    await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE")
+    await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP")
+    await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_paid BOOLEAN DEFAULT FALSE")
+    await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_until DATE")
+    await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS plan VARCHAR DEFAULT 'free'")
+    await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS total_paid DOUBLE PRECISION DEFAULT 0")
+
+async def _ensure_sqlite_initialized() -> None:
+    global _sqlite_initialized
+    if _sqlite_initialized:
+        return
+    async with _sqlite_init_lock:
+        if _sqlite_initialized:
+            return
+        async with sqlite_engine.begin() as conn:
+            await _init_schema(conn, "SQLite")
+        _sqlite_initialized = True
+
 async def get_db():
-    async with AsyncSessionLocal() as session:
+    global _active_db_type
+    if _active_db_type == "PostgreSQL":
+        async with AsyncSessionLocal() as session:
+            if not _fallback_to_sqlite:
+                yield session
+                return
+            probe_timeout_s = float(os.getenv("DB_PROBE_TIMEOUT", "2.5"))
+            try:
+                await asyncio.wait_for(session.execute(text("SELECT 1")), timeout=probe_timeout_s)
+            except Exception:
+                _active_db_type = "SQLite"
+            else:
+                yield session
+                return
+
+    await _ensure_sqlite_initialized()
+    async with SqliteSessionLocal() as session:
         yield session
 
 async def init_db():
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        if DB_TYPE == "SQLite":
-            result = await conn.exec_driver_sql("PRAGMA table_info(users)")
-            cols = [row[1] for row in result.fetchall()]
-            if "is_admin" not in cols:
-                await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT 0")
-            if "last_login_at" not in cols:
-                await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN last_login_at DATETIME")
-            if "is_paid" not in cols:
-                await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN is_paid BOOLEAN DEFAULT 0")
-            if "paid_until" not in cols:
-                await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN paid_until DATE")
-            if "plan" not in cols:
-                await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN plan VARCHAR DEFAULT 'free'")
-            if "total_paid" not in cols:
-                await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN total_paid FLOAT DEFAULT 0")
-
-            result = await conn.exec_driver_sql("PRAGMA table_info(trades)")
-            cols = [row[1] for row in result.fetchall()]
-            if "strategy_id" not in cols:
-                await conn.exec_driver_sql("ALTER TABLE trades ADD COLUMN strategy_id INTEGER")
-            if "client_request_id" not in cols:
-                await conn.exec_driver_sql("ALTER TABLE trades ADD COLUMN client_request_id VARCHAR")
-            if "open_trade_id" not in cols:
-                await conn.exec_driver_sql("ALTER TABLE trades ADD COLUMN open_trade_id INTEGER")
-            await conn.exec_driver_sql(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_trades_user_client_request_id ON trades(user_id, client_request_id) WHERE client_request_id IS NOT NULL"
-            )
-            await conn.exec_driver_sql(
-                "CREATE INDEX IF NOT EXISTS idx_trades_open_trade_id ON trades(user_id, strategy_id, open_trade_id)"
-            )
-            await conn.exec_driver_sql("UPDATE trades SET open_trade_id = id WHERE open_trade_id IS NULL")
-
-            result = await conn.exec_driver_sql("PRAGMA table_info(forex_trades)")
-            cols = [row[1] for row in result.fetchall()]
-            if "strategy_id" not in cols:
-                await conn.exec_driver_sql("ALTER TABLE forex_trades ADD COLUMN strategy_id INTEGER")
-            if "client_request_id" not in cols:
-                await conn.exec_driver_sql("ALTER TABLE forex_trades ADD COLUMN client_request_id VARCHAR")
-            await conn.exec_driver_sql(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_forex_trades_user_client_request_id ON forex_trades(user_id, client_request_id) WHERE client_request_id IS NOT NULL"
-            )
-
-            result = await conn.exec_driver_sql("PRAGMA table_info(forex_accounts)")
-            cols = [row[1] for row in result.fetchall()]
-            if "initial_balance" not in cols:
-                await conn.exec_driver_sql(
-                    "ALTER TABLE forex_accounts ADD COLUMN initial_balance FLOAT DEFAULT 10000"
-                )
-                await conn.exec_driver_sql(
-                    "UPDATE forex_accounts SET initial_balance = COALESCE(initial_balance, balance, 10000)"
-                )
-            if "initial_date" not in cols:
-                await conn.exec_driver_sql("ALTER TABLE forex_accounts ADD COLUMN initial_date DATE")
-                await conn.exec_driver_sql(
-                    "UPDATE forex_accounts SET initial_date = COALESCE(initial_date, DATE(created_at), DATE('now'))"
-                )
-        else:
-            await conn.exec_driver_sql("ALTER TABLE trades ADD COLUMN IF NOT EXISTS strategy_id INTEGER")
-            await conn.exec_driver_sql("ALTER TABLE forex_trades ADD COLUMN IF NOT EXISTS strategy_id INTEGER")
-            await conn.exec_driver_sql("ALTER TABLE trades ADD COLUMN IF NOT EXISTS client_request_id VARCHAR")
-            await conn.exec_driver_sql("ALTER TABLE forex_trades ADD COLUMN IF NOT EXISTS client_request_id VARCHAR")
-            await conn.exec_driver_sql("ALTER TABLE trades ADD COLUMN IF NOT EXISTS open_trade_id INTEGER")
-            await conn.exec_driver_sql(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_trades_user_client_request_id ON trades(user_id, client_request_id) WHERE client_request_id IS NOT NULL"
-            )
-            await conn.exec_driver_sql(
-                "CREATE INDEX IF NOT EXISTS idx_trades_open_trade_id ON trades(user_id, strategy_id, open_trade_id)"
-            )
-            await conn.exec_driver_sql("UPDATE trades SET open_trade_id = id WHERE open_trade_id IS NULL")
-            await conn.exec_driver_sql(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_forex_trades_user_client_request_id ON forex_trades(user_id, client_request_id) WHERE client_request_id IS NOT NULL"
-            )
-            await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE")
-            await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP")
-            await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_paid BOOLEAN DEFAULT FALSE")
-            await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_until DATE")
-            await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS plan VARCHAR DEFAULT 'free'")
-            await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS total_paid DOUBLE PRECISION DEFAULT 0")
+        await _init_schema(conn, DB_TYPE)
+    if DB_TYPE != "SQLite":
+        await _ensure_sqlite_initialized()
