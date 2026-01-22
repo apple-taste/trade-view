@@ -33,7 +33,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null);
   const [loading, setLoading] = useState(true);
-  const authTimeoutMs = 15000;
+  const authTimeoutMs = 30000;
 
   useEffect(() => {
     logger.info('🔐 [Auth] 初始化认证上下文');

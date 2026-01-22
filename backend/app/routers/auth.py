@@ -66,7 +66,7 @@ def create_access_token(user_id: int, is_admin: bool = False) -> str:
 )
 async def register(user_data: UserRegister, db: AsyncSession = Depends(get_db)):
     logger.info(f"🔐 [注册] 用户名: {user_data.username}, 邮箱: {user_data.email}")
-    db_timeout_s = float(os.getenv("DB_QUERY_TIMEOUT", "8"))
+    db_timeout_s = float(os.getenv("DB_QUERY_TIMEOUT", "12"))
     
     # 检查用户是否已存在
     try:
@@ -92,9 +92,17 @@ async def register(user_data: UserRegister, db: AsyncSession = Depends(get_db)):
         email=user_data.email,
         password_hash=password_hash
     )
-    db.add(new_user)
-    await db.commit()
-    await db.refresh(new_user)
+    try:
+        db.add(new_user)
+        await asyncio.wait_for(db.commit(), timeout=db_timeout_s)
+        await asyncio.wait_for(db.refresh(new_user), timeout=db_timeout_s)
+    except (asyncio.TimeoutError, TimeoutError, SQLAlchemyError) as e:
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        logger.error(f"❌ [注册失败] 数据库不可用: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="数据库暂不可用，请稍后重试")
     
     # 初始化资金历史
     initial_capital = 100000  # 默认10万
@@ -103,8 +111,16 @@ async def register(user_data: UserRegister, db: AsyncSession = Depends(get_db)):
         date=datetime.utcnow().date(),
         capital=initial_capital
     )
-    db.add(capital_history)
-    await db.commit()
+    try:
+        db.add(capital_history)
+        await asyncio.wait_for(db.commit(), timeout=db_timeout_s)
+    except (asyncio.TimeoutError, TimeoutError, SQLAlchemyError) as e:
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        logger.error(f"❌ [注册失败] 数据库不可用: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="数据库暂不可用，请稍后重试")
     
     # 生成token
     token = create_access_token(new_user.id, bool(getattr(new_user, "is_admin", False)))
@@ -160,7 +176,7 @@ async def register(user_data: UserRegister, db: AsyncSession = Depends(get_db)):
 )
 async def login(user_data: UserLogin, db: AsyncSession = Depends(get_db)):
     logger.info(f"🔑 [登录] 用户名: {user_data.username}")
-    db_timeout_s = float(os.getenv("DB_QUERY_TIMEOUT", "8"))
+    db_timeout_s = float(os.getenv("DB_QUERY_TIMEOUT", "12"))
     
     # 查找用户
     try:
