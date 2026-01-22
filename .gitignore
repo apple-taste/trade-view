@@ -5,6 +5,8 @@ build/
 .env.local
 *.log
 .DS_Store
+database.db
+database.db-journal
 backend/database.db
 backend/database.db-journal
 backend/venv/

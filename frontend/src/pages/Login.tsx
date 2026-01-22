@@ -9,6 +9,7 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const { login, register } = useAuth();
   const navigate = useNavigate();
 
@@ -18,17 +19,27 @@ export default function Login() {
 
     try {
       if (isLogin) {
+        setSubmitting(true);
         await login(username, password);
       } else {
         if (!email) {
           setError('请填写邮箱');
           return;
         }
+        setSubmitting(true);
         await register(username, email, password);
       }
       navigate('/');
     } catch (err: any) {
-      setError(err.response?.data?.error || '操作失败');
+      const detail = err?.response?.data?.detail;
+      const msg =
+        (typeof detail === 'string' && detail) ||
+        err?.response?.data?.error ||
+        err?.message ||
+        '操作失败';
+      setError(msg);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -243,7 +254,8 @@ export default function Login() {
             <div>
               <button
                 type="submit"
-                className="w-full py-4 rounded-xl font-black text-xl tracking-widest transition-all duration-300 hover:scale-105 active:scale-95"
+                disabled={submitting}
+                className="w-full py-4 rounded-xl font-black text-xl tracking-widest transition-all duration-300 hover:scale-105 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed"
                 style={{
                   background: 'linear-gradient(135deg, #FFD700 0%, #FFA500 50%, #FFD700 100%)',
                   color: '#1a0f3d',
@@ -252,7 +264,7 @@ export default function Login() {
                   border: '3px solid rgba(255, 255, 255, 0.3)',
                 }}
               >
-                {isLogin ? '🚀 开始冒险' : '✨ 创建账号'}
+                {submitting ? (isLogin ? '登录中…' : '注册中…') : isLogin ? '🚀 开始冒险' : '✨ 创建账号'}
               </button>
             </div>
 
@@ -260,11 +272,12 @@ export default function Login() {
             <div className="text-center pt-4">
               <button
                 type="button"
+                disabled={submitting}
                 onClick={() => {
                   setIsLogin(!isLogin);
                   setError('');
                 }}
-                className="text-sm font-bold tracking-wide transition-all duration-300 hover:scale-110"
+                className="text-sm font-bold tracking-wide transition-all duration-300 hover:scale-110 disabled:opacity-60 disabled:cursor-not-allowed"
                 style={{
                   color: '#FFD700',
                   textShadow: '0 0 10px rgba(255, 215, 0, 0.5)',

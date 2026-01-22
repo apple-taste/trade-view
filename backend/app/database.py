@@ -40,7 +40,21 @@ else:
         print(f"📦 [数据库] 数据库文件大小: {file_size} 字节")
     DB_TYPE = "SQLite"
 
-engine = create_async_engine(DATABASE_URL, echo=False)  # 关闭echo减少日志
+engine_kwargs = {"echo": False}
+if DB_TYPE == "PostgreSQL":
+    connect_timeout = int(os.getenv("DB_CONNECT_TIMEOUT", "10"))
+    command_timeout = int(os.getenv("DB_COMMAND_TIMEOUT", "60"))
+    engine_kwargs.update(
+        {
+            "pool_pre_ping": True,
+            "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", "1800")),
+            "pool_size": int(os.getenv("DB_POOL_SIZE", "5")),
+            "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "5")),
+            "connect_args": {"timeout": connect_timeout, "command_timeout": command_timeout},
+        }
+    )
+
+engine = create_async_engine(DATABASE_URL, **engine_kwargs)  # 关闭echo减少日志
 try:
     from sqlalchemy.ext.asyncio import async_sessionmaker  # type: ignore
 

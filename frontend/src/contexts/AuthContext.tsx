@@ -33,6 +33,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const authTimeoutMs = 15000;
 
   useEffect(() => {
     logger.info('🔐 [Auth] 初始化认证上下文');
@@ -52,7 +53,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const fetchUserProfile = async () => {
     try {
       logger.info('📡 [Auth] 获取用户信息...');
-      const response = await axios.get('/api/user/profile');
+      const response = await axios.get('/api/user/profile', { timeout: authTimeoutMs });
       logger.info('✅ [Auth] 用户信息获取成功', response.data);
       setUser(response.data);
     } catch (error: any) {
@@ -67,7 +68,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchBillingStatus = async () => {
     try {
-      const res = await axios.get('/api/user/billing-status');
+      const res = await axios.get('/api/user/billing-status', { timeout: authTimeoutMs });
       setBillingStatus(res.data);
     } catch {
       setBillingStatus(null);
@@ -77,7 +78,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async (username: string, password: string) => {
     try {
       logger.info(`🔑 [Auth] 尝试登录用户: ${username}`);
-      const response = await axios.post('/api/auth/login', { username, password });
+      const response = await axios.post('/api/auth/login', { username, password }, { timeout: authTimeoutMs });
       const { token: newToken, user: userData } = response.data;
       logger.info('✅ [Auth] 登录成功', { userId: userData.id, username: userData.username });
       setToken(newToken);
@@ -94,7 +95,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const register = async (username: string, email: string, password: string) => {
     try {
       logger.info(`📝 [Auth] 尝试注册用户: ${username} (${email})`);
-      const response = await axios.post('/api/auth/register', { username, email, password });
+      const response = await axios.post('/api/auth/register', { username, email, password }, { timeout: authTimeoutMs });
       const { token: newToken, user: userData } = response.data;
       logger.info('✅ [Auth] 注册成功', { userId: userData.id, username: userData.username });
       setToken(newToken);

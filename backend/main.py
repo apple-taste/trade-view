@@ -12,11 +12,6 @@ from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 
-from app.database import init_db
-from app.routers import auth, user, trades, positions, analysis, price, forex, admin
-from app.services.price_monitor import price_monitor
-from app.services.alert_monitor import alert_monitor
-
 # 加载环境变量（必须在其他导入之前）
 env_path = Path(__file__).parent / '.env'
 if env_path.exists():
@@ -26,6 +21,11 @@ if env_path.exists():
 else:
     logger_temp = logging.getLogger(__name__)
     logger_temp.warning(f"⚠️ 环境变量文件不存在: {env_path}")
+
+from app.database import init_db
+from app.routers import auth, user, trades, positions, analysis, price, forex, admin
+from app.services.price_monitor import price_monitor
+from app.services.alert_monitor import alert_monitor
 
 # 配置日志
 logging.basicConfig(
