@@ -59,7 +59,11 @@ DB_DIR.mkdir(parents=True, exist_ok=True)
 SQLITE_DATABASE_PATH = DB_DIR / "database.db"
 SQLITE_DATABASE_URL = f"sqlite+aiosqlite:///{SQLITE_DATABASE_PATH}"
 
-_fallback_to_sqlite = (os.getenv("DB_FALLBACK_TO_SQLITE", "true") or "").strip().lower() in {"1", "true", "yes", "on"}
+_node_env = (os.getenv("NODE_ENV", "") or "").strip().lower()
+_default_fallback_to_sqlite = "false" if _node_env == "production" else "true"
+_fallback_to_sqlite = (
+    os.getenv("DB_FALLBACK_TO_SQLITE", _default_fallback_to_sqlite) or ""
+).strip().lower() in {"1", "true", "yes", "on"}
 _active_db_type = DB_TYPE
 _sqlite_initialized = False
 _sqlite_init_lock = asyncio.Lock()

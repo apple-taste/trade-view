@@ -11,7 +11,7 @@ from typing import Dict, Set
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Trade, User, AsyncSessionLocal
+from app.database import Trade, User, get_db
 from app.services.price_monitor import price_monitor
 from app.services.email_service import default_email_service
 
@@ -60,30 +60,25 @@ class AlertMonitor:
     
     async def _check_all_positions(self):
         """检查所有持仓的止损止盈条件"""
-        async with AsyncSessionLocal() as db:
+        async for db in get_db():
             try:
-                # 查询所有开仓的持仓
                 result = await db.execute(
-                    select(Trade).where(
-                        Trade.status == "open",
-                        Trade.is_deleted == False
-                    )
+                    select(Trade).where(Trade.status == "open", Trade.is_deleted == False)
                 )
                 positions = result.scalars().all()
-                
+
                 if not positions:
                     return
-                
-                # 批量获取股票价格
+
                 stock_codes = [pos.stock_code for pos in positions if pos.stock_code]
                 price_data = await price_monitor.batch_fetch_prices(stock_codes)
-                
-                # 检查每个持仓
+
                 for position in positions:
                     await self._check_position_alert(db, position, price_data)
-                
+
             except Exception as e:
                 logger.error(f"检查持仓闹铃失败: {e}")
+            return
     
     async def _check_position_alert(
         self,
