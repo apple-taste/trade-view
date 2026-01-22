@@ -62,8 +62,10 @@ if DB_TYPE == "PostgreSQL":
 
     db_ssl = os.getenv("DB_SSL", "auto").strip().lower()
     if db_ssl not in {"0", "false", "no", "disable", "disabled"}:
+        disable_ssl_verify = os.getenv("DISABLE_SSL_VERIFY", "false").strip().lower() in {"1", "true", "yes", "on"}
+        db_ssl_verify = os.getenv("DB_SSL_VERIFY", "auto").strip().lower()
         ssl_context = None
-        if db_ssl in {"1", "true", "yes", "require", "required"}:
+        if db_ssl in {"verify", "verify-full", "verify_full", "strict"}:
             ssl_context = ssl_module.create_default_context()
         else:
             node_env = os.getenv("NODE_ENV", "").strip().lower()
@@ -75,6 +77,14 @@ if DB_TYPE == "PostgreSQL":
             if node_env == "production" or host.endswith("supabase.co"):
                 ssl_context = ssl_module.create_default_context()
         if ssl_context is not None:
+            verify_enabled = db_ssl in {"verify", "verify-full", "verify_full", "strict"}
+            if db_ssl_verify in {"1", "true", "yes", "on"}:
+                verify_enabled = True
+            if disable_ssl_verify or db_ssl_verify in {"0", "false", "no", "off", "disable", "disabled", "insecure", "allow"}:
+                verify_enabled = False
+            if not verify_enabled:
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl_module.CERT_NONE
             connect_args["ssl"] = ssl_context
 
     engine_kwargs.update(
