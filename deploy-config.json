@@ -10,7 +10,7 @@
     "FORCE_REBUILD": "2026-01-16-v1-$(date +%s)",
     "DB_FALLBACK_TO_SQLITE": "false",
     "DB_SSL_VERIFY": "false",
-    "DB_CONNECT_TIMEOUT": "15",
+    "DB_CONNECT_TIMEOUT": "30",
     "DB_COMMAND_TIMEOUT": "60",
     "DB_QUERY_TIMEOUT": "15"
   }

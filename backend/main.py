@@ -80,9 +80,6 @@ async def lifespan(app: FastAPI):
         logger.info("✅ [数据库] 数据库初始化完成")
     except Exception as e:
         logger.error(f"❌ [数据库] 数据库初始化失败: {e}", exc_info=True)
-        node_env = (os.getenv("NODE_ENV", "") or "").strip().lower()
-        if node_env == "production" and (os.getenv("DATABASE_URL", "") or "").strip():
-            raise
         logger.warning("⚠️  [数据库] 数据库初始化失败，但应用将继续运行")
     
     # 启动价格监控服务（非关键服务，失败不阻止启动）

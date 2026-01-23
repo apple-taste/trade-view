@@ -203,12 +203,12 @@ export default function Billing() {
             </div>
           ) : null}
 
-          {billingStatus?.billing_enabled ? (
-            <div className="mt-3 bg-gray-800/50 px-3 py-2 rounded border border-gray-700 text-sm text-gray-300">
-              价格：
-              {pricing?.amount_cents != null ? ` ¥${(Number(pricing.amount_cents) / 100).toFixed(2)} / ${months}个月` : ' -'}
-            </div>
-          ) : null}
+          <div className="mt-3 bg-gray-800/50 px-3 py-2 rounded border border-gray-700 text-sm text-gray-300">
+            价格：
+            {pricing?.unit_price_cents != null
+              ? ` pro 月费 ¥${(Number(pricing.unit_price_cents) / 100).toFixed(2)}，${months} 个月合计 ¥${(Number(pricing.amount_cents) / 100).toFixed(2)}`
+              : ' -'}
+          </div>
 
           <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
             <button

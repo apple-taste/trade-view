@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from passlib.context import CryptContext
 from jose import jwt
@@ -66,7 +66,14 @@ def create_access_token(user_id: int, is_admin: bool = False) -> str:
 )
 async def register(user_data: UserRegister, db: AsyncSession = Depends(get_db)):
     logger.info(f"🔐 [注册] 用户名: {user_data.username}, 邮箱: {user_data.email}")
-    db_timeout_s = float(os.getenv("DB_QUERY_TIMEOUT", "12"))
+    probe_timeout_s = float(os.getenv("DB_PROBE_TIMEOUT", "2.5"))
+    db_timeout_s = float(os.getenv("DB_QUERY_TIMEOUT", "8"))
+    
+    try:
+        await asyncio.wait_for(db.execute(text("SELECT 1")), timeout=probe_timeout_s)
+    except Exception as e:
+        logger.error(f"❌ [注册失败] 数据库探测失败: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="数据库暂不可用，请稍后重试")
     
     # 检查用户是否已存在
     try:
@@ -176,7 +183,14 @@ async def register(user_data: UserRegister, db: AsyncSession = Depends(get_db)):
 )
 async def login(user_data: UserLogin, db: AsyncSession = Depends(get_db)):
     logger.info(f"🔑 [登录] 用户名: {user_data.username}")
-    db_timeout_s = float(os.getenv("DB_QUERY_TIMEOUT", "12"))
+    probe_timeout_s = float(os.getenv("DB_PROBE_TIMEOUT", "2.5"))
+    db_timeout_s = float(os.getenv("DB_QUERY_TIMEOUT", "8"))
+    
+    try:
+        await asyncio.wait_for(db.execute(text("SELECT 1")), timeout=probe_timeout_s)
+    except Exception as e:
+        logger.error(f"❌ [登录失败] 数据库探测失败: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="数据库暂不可用，请稍后重试")
     
     # 查找用户
     try:
@@ -205,10 +219,13 @@ async def login(user_data: UserLogin, db: AsyncSession = Depends(get_db)):
     
     user.last_login_at = datetime.utcnow()
     try:
-        await asyncio.wait_for(db.commit(), timeout=db_timeout_s)
-    except (asyncio.TimeoutError, TimeoutError, SQLAlchemyError) as e:
-        logger.error(f"❌ [登录失败] 数据库不可用: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="数据库暂不可用，请稍后重试")
+        await asyncio.wait_for(db.commit(), timeout=3.0)
+    except Exception as e:
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        logger.warning(f"⚠️ [登录] 更新最后登录时间失败（忽略）: {e}")
 
     # 生成token
     token = create_access_token(user.id, bool(getattr(user, "is_admin", False)))

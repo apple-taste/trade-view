@@ -82,6 +82,47 @@ except Exception:
 
 SqliteSessionLocal = _make_sessionmaker(sqlite_engine)
 
+def _try_make_supabase_pooler_url(database_url: str) -> str | None:
+    try:
+        parts = urlsplit(database_url)
+        host = parts.hostname or ""
+        if not host.endswith("supabase.co"):
+            return None
+        port = parts.port
+        if port not in {None, 5432}:
+            return None
+
+        pooler_port = int(os.getenv("DB_SUPABASE_POOLER_PORT", "6543"))
+        netloc = parts.netloc
+        if "@" in netloc:
+            userinfo, hostinfo = netloc.rsplit("@", 1)
+        else:
+            userinfo, hostinfo = "", netloc
+
+        if hostinfo.startswith("["):
+            if "]" not in hostinfo:
+                return None
+            host_part, rest = hostinfo.split("]", 1)
+            host_part = f"{host_part}]"
+            hostinfo = f"{host_part}:{pooler_port}"
+        else:
+            host_only = hostinfo
+            existing_port = None
+            if ":" in hostinfo:
+                maybe_host, maybe_port = hostinfo.rsplit(":", 1)
+                if maybe_port.isdigit():
+                    host_only = maybe_host
+                    existing_port = int(maybe_port)
+            if existing_port in {None, 5432}:
+                hostinfo = f"{host_only}:{pooler_port}"
+            else:
+                return None
+
+        new_netloc = f"{userinfo}@{hostinfo}" if userinfo else hostinfo
+        return urlunsplit((parts.scheme, new_netloc, parts.path, parts.query, parts.fragment))
+    except Exception:
+        return None
+
 if DB_TYPE == "PostgreSQL":
     connect_timeout = int(os.getenv("DB_CONNECT_TIMEOUT", "60"))
     command_timeout = int(os.getenv("DB_COMMAND_TIMEOUT", "60"))
@@ -125,12 +166,33 @@ if DB_TYPE == "PostgreSQL":
         }
     )
 
-postgres_engine = create_async_engine(DATABASE_URL, **engine_kwargs)
-PostgresSessionLocal = _make_sessionmaker(postgres_engine)
+postgres_engine_primary = create_async_engine(DATABASE_URL, **engine_kwargs)
+PostgresSessionLocalPrimary = _make_sessionmaker(postgres_engine_primary)
+
+_supabase_pooler_url = _try_make_supabase_pooler_url(DATABASE_URL) if DB_TYPE == "PostgreSQL" else None
+postgres_engine_pooler = (
+    create_async_engine(_supabase_pooler_url, **engine_kwargs) if _supabase_pooler_url else None
+)
+PostgresSessionLocalPooler = _make_sessionmaker(postgres_engine_pooler) if postgres_engine_pooler else None
+
+_active_postgres_variant = "primary"
+
+def _switch_postgres_variant(variant: str) -> None:
+    global engine, AsyncSessionLocal, _active_postgres_variant
+    if DB_TYPE != "PostgreSQL":
+        return
+    if variant == "pooler" and postgres_engine_pooler and PostgresSessionLocalPooler:
+        engine = postgres_engine_pooler
+        AsyncSessionLocal = PostgresSessionLocalPooler
+        _active_postgres_variant = "pooler"
+        return
+    engine = postgres_engine_primary
+    AsyncSessionLocal = PostgresSessionLocalPrimary
+    _active_postgres_variant = "primary"
 
 if DB_TYPE == "PostgreSQL":
-    engine = postgres_engine
-    AsyncSessionLocal = PostgresSessionLocal
+    engine = postgres_engine_primary
+    AsyncSessionLocal = PostgresSessionLocalPrimary
 else:
     engine = sqlite_engine
     AsyncSessionLocal = SqliteSessionLocal
@@ -436,7 +498,22 @@ async def get_db():
         yield session
 
 async def init_db():
-    async with engine.begin() as conn:
-        await _init_schema(conn, DB_TYPE)
+    global _active_db_type
+    if DB_TYPE == "PostgreSQL":
+        _active_db_type = "PostgreSQL"
+        _switch_postgres_variant("primary")
+        try:
+            async with engine.begin() as conn:
+                await _init_schema(conn, "PostgreSQL")
+        except Exception:
+            if postgres_engine_pooler and PostgresSessionLocalPooler:
+                _switch_postgres_variant("pooler")
+                async with engine.begin() as conn:
+                    await _init_schema(conn, "PostgreSQL")
+            else:
+                raise
+    else:
+        async with engine.begin() as conn:
+            await _init_schema(conn, "SQLite")
     if DB_TYPE != "SQLite":
         await _ensure_sqlite_initialized()
