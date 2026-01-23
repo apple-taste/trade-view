@@ -361,6 +361,7 @@ async def health_check(request: Request):
             parts = urlsplit(db_url) if db_url else None
             host = parts.hostname if parts else None
             port = parts.port if parts else None
+            username = parts.username if parts else None
             is_pooler_host = bool(host) and str(host).endswith("pooler.supabase.com")
             db_info = {
                 "db_type": getattr(dbmod, "DB_TYPE", None),
@@ -368,11 +369,18 @@ async def health_check(request: Request):
                 "active_postgres_variant": getattr(dbmod, "_active_postgres_variant", None),
                 "host": host,
                 "port": port,
+                "user": username,
                 "pooler_configured": bool(getattr(dbmod, "_supabase_pooler_url", None)) or is_pooler_host,
             }
 
             ping = None
-            if getattr(dbmod, "DB_TYPE", None) == "PostgreSQL":
+            do_db_ping = (request.query_params.get("db_ping") or request.query_params.get("db") or "").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+            if do_db_ping and getattr(dbmod, "DB_TYPE", None) == "PostgreSQL":
                 try:
                     from sqlalchemy import text as _sql_text
 
