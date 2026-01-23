@@ -36,6 +36,20 @@ if DATABASE_URL:
     
     print(f"📦 [数据库] 使用PostgreSQL数据库")
     print(f"📦 [数据库] DATABASE_URL: {_safe_database_url_for_log(DATABASE_URL)}")
+    try:
+        _parts_for_log = urlsplit(DATABASE_URL)
+        _db_host = _parts_for_log.hostname or ""
+        _db_port = _parts_for_log.port
+        _db_conn_kind = "unknown"
+        if _db_host.endswith("supabase.co") and _db_host.startswith("db."):
+            _db_conn_kind = "supabase_direct"
+        elif _db_host.endswith("pooler.supabase.com"):
+            _db_conn_kind = "supabase_pooler"
+        print(f"📦 [数据库] 连接信息: host={_db_host} port={_db_port or ''} type={_db_conn_kind}")
+        if _db_conn_kind == "supabase_direct":
+            print("⚠️  [数据库] Supabase直连可能不兼容IPv4网络，建议改用Session Pooler连接串")
+    except Exception:
+        pass
     DB_TYPE = "PostgreSQL"
 else:
     # 使用SQLite（本地开发）
@@ -61,9 +75,12 @@ SQLITE_DATABASE_URL = f"sqlite+aiosqlite:///{SQLITE_DATABASE_PATH}"
 
 _node_env = (os.getenv("NODE_ENV", "") or "").strip().lower()
 _default_fallback_to_sqlite = "false" if _node_env == "production" else "true"
-_fallback_to_sqlite = (
-    os.getenv("DB_FALLBACK_TO_SQLITE", _default_fallback_to_sqlite) or ""
-).strip().lower() in {"1", "true", "yes", "on"}
+if _node_env == "production":
+    _fallback_to_sqlite = False
+else:
+    _fallback_to_sqlite = (
+        os.getenv("DB_FALLBACK_TO_SQLITE", _default_fallback_to_sqlite) or ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
 _active_db_type = DB_TYPE
 _sqlite_initialized = False
 _sqlite_init_lock = asyncio.Lock()
@@ -82,50 +99,32 @@ except Exception:
 
 SqliteSessionLocal = _make_sessionmaker(sqlite_engine)
 
-def _try_make_supabase_pooler_url(database_url: str) -> str | None:
-    try:
-        parts = urlsplit(database_url)
-        host = parts.hostname or ""
-        if not host.endswith("supabase.co"):
-            return None
-        port = parts.port
-        if port not in {None, 5432}:
-            return None
+def _normalize_postgres_asyncpg_url(database_url: str) -> str:
+    database_url = (database_url or "").strip()
+    if database_url.startswith("postgresql+asyncpg://"):
+        return database_url
+    if database_url.startswith("postgresql://"):
+        return database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    if database_url.startswith("postgres://"):
+        return database_url.replace("postgres://", "postgresql+asyncpg://", 1)
+    return database_url
 
-        pooler_port = int(os.getenv("DB_SUPABASE_POOLER_PORT", "6543"))
-        netloc = parts.netloc
-        if "@" in netloc:
-            userinfo, hostinfo = netloc.rsplit("@", 1)
-        else:
-            userinfo, hostinfo = "", netloc
-
-        if hostinfo.startswith("["):
-            if "]" not in hostinfo:
-                return None
-            host_part, rest = hostinfo.split("]", 1)
-            host_part = f"{host_part}]"
-            hostinfo = f"{host_part}:{pooler_port}"
-        else:
-            host_only = hostinfo
-            existing_port = None
-            if ":" in hostinfo:
-                maybe_host, maybe_port = hostinfo.rsplit(":", 1)
-                if maybe_port.isdigit():
-                    host_only = maybe_host
-                    existing_port = int(maybe_port)
-            if existing_port in {None, 5432}:
-                hostinfo = f"{host_only}:{pooler_port}"
-            else:
-                return None
-
-        new_netloc = f"{userinfo}@{hostinfo}" if userinfo else hostinfo
-        return urlunsplit((parts.scheme, new_netloc, parts.path, parts.query, parts.fragment))
-    except Exception:
-        return None
+def _get_pooler_database_url() -> str | None:
+    explicit = (
+        os.getenv("DB_POOLER_DATABASE_URL")
+        or os.getenv("DATABASE_POOLER_URL")
+        or os.getenv("SUPABASE_POOLER_DATABASE_URL")
+        or os.getenv("SUPABASE_POOLER_URL")
+    )
+    if explicit and explicit.strip():
+        return _normalize_postgres_asyncpg_url(explicit)
+    return None
 
 if DB_TYPE == "PostgreSQL":
     connect_timeout = int(os.getenv("DB_CONNECT_TIMEOUT", "60"))
     command_timeout = int(os.getenv("DB_COMMAND_TIMEOUT", "60"))
+    if (os.getenv("NODE_ENV", "") or "").strip().lower() == "production":
+        connect_timeout = min(connect_timeout, 5)
     connect_args = {"timeout": connect_timeout, "command_timeout": command_timeout}
 
     db_ssl = os.getenv("DB_SSL", "auto").strip().lower()
@@ -169,7 +168,7 @@ if DB_TYPE == "PostgreSQL":
 postgres_engine_primary = create_async_engine(DATABASE_URL, **engine_kwargs)
 PostgresSessionLocalPrimary = _make_sessionmaker(postgres_engine_primary)
 
-_supabase_pooler_url = _try_make_supabase_pooler_url(DATABASE_URL) if DB_TYPE == "PostgreSQL" else None
+_supabase_pooler_url = _get_pooler_database_url() if DB_TYPE == "PostgreSQL" else None
 postgres_engine_pooler = (
     create_async_engine(_supabase_pooler_url, **engine_kwargs) if _supabase_pooler_url else None
 )

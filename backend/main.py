@@ -8,6 +8,7 @@ import uvicorn
 import logging
 import time
 import os
+import asyncio
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
@@ -75,12 +76,19 @@ async def lifespan(app: FastAPI):
     
     # 启动时初始化数据库（非阻塞，失败不阻止启动）
     logger.info("📦 [数据库] 正在初始化数据库...")
-    try:
-        await init_db()
-        logger.info("✅ [数据库] 数据库初始化完成")
-    except Exception as e:
-        logger.error(f"❌ [数据库] 数据库初始化失败: {e}", exc_info=True)
-        logger.warning("⚠️  [数据库] 数据库初始化失败，但应用将继续运行")
+    async def _init_db_background():
+        try:
+            init_timeout_s = float(os.getenv("DB_INIT_TIMEOUT", "8"))
+            await asyncio.wait_for(init_db(), timeout=init_timeout_s)
+            logger.info("✅ [数据库] 数据库初始化完成")
+        except asyncio.TimeoutError as e:
+            logger.error(f"❌ [数据库] 数据库初始化超时: {e}", exc_info=True)
+            logger.warning("⚠️  [数据库] 数据库初始化失败，但应用将继续运行")
+        except Exception as e:
+            logger.error(f"❌ [数据库] 数据库初始化失败: {e}", exc_info=True)
+            logger.warning("⚠️  [数据库] 数据库初始化失败，但应用将继续运行")
+
+    asyncio.create_task(_init_db_background())
     
     # 启动价格监控服务（非关键服务，失败不阻止启动）
     logger.info("📊 [价格监控] 正在启动价格监控服务...")
@@ -343,6 +351,26 @@ async def health_check(request: Request):
         # 判断整体健康状态（只要应用能响应请求就认为健康）
         # 监控服务失败不影响基本功能
         is_healthy = True
+
+        db_info = None
+        try:
+            from urllib.parse import urlsplit
+            from app import database as dbmod
+
+            db_url = str(getattr(dbmod, "DATABASE_URL", "") or "")
+            parts = urlsplit(db_url) if db_url else None
+            host = parts.hostname if parts else None
+            port = parts.port if parts else None
+            db_info = {
+                "db_type": getattr(dbmod, "DB_TYPE", None),
+                "active_db_type": getattr(dbmod, "_active_db_type", None),
+                "active_postgres_variant": getattr(dbmod, "_active_postgres_variant", None),
+                "host": host,
+                "port": port,
+                "pooler_configured": bool(getattr(dbmod, "_supabase_pooler_url", None)),
+            }
+        except Exception:
+            db_info = None
         
         logger.info(f"🏥 [健康检查] 服务状态检查 - {'健康' if is_healthy else '异常'}")
         logger.info(f"   • 价格监控: {price_monitor_status}")
@@ -357,6 +385,7 @@ async def health_check(request: Request):
             "price_monitor": price_monitor_status,
             "alert_monitor": alert_monitor_status,
             "environment": env_status,
+            "database": db_info,
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
