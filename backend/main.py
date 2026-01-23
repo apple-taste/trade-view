@@ -361,14 +361,32 @@ async def health_check(request: Request):
             parts = urlsplit(db_url) if db_url else None
             host = parts.hostname if parts else None
             port = parts.port if parts else None
+            is_pooler_host = bool(host) and str(host).endswith("pooler.supabase.com")
             db_info = {
                 "db_type": getattr(dbmod, "DB_TYPE", None),
                 "active_db_type": getattr(dbmod, "_active_db_type", None),
                 "active_postgres_variant": getattr(dbmod, "_active_postgres_variant", None),
                 "host": host,
                 "port": port,
-                "pooler_configured": bool(getattr(dbmod, "_supabase_pooler_url", None)),
+                "pooler_configured": bool(getattr(dbmod, "_supabase_pooler_url", None)) or is_pooler_host,
             }
+
+            ping = None
+            if getattr(dbmod, "DB_TYPE", None) == "PostgreSQL":
+                try:
+                    from sqlalchemy import text as _sql_text
+
+                    start = time.perf_counter()
+                    async with dbmod.engine.connect() as conn:
+                        await conn.execute(_sql_text("SELECT 1"))
+                    ping = {"ok": True, "ms": int((time.perf_counter() - start) * 1000)}
+                except Exception as e:
+                    ping = {
+                        "ok": False,
+                        "error": type(e).__name__,
+                        "message": (str(e) or "")[:160],
+                    }
+            db_info["ping"] = ping
         except Exception:
             db_info = None
         
