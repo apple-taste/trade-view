@@ -936,6 +936,13 @@ async def get_trades_by_stock_code(
         
         if not trades:
             raise HTTPException(status_code=404, detail=f"未找到股票代码 {stock_code} 的交易记录")
+
+        if any((not t.stock_name or t.stock_name.strip() == "") and t.stock_code for t in trades):
+            fetched_name = await price_monitor.fetch_stock_name(stock_code)
+            if fetched_name:
+                for t in trades:
+                    t.stock_name = fetched_name
+                await db.commit()
         
         # 计算风险回报比并构建响应
         trade_responses = []

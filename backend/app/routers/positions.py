@@ -134,6 +134,20 @@ async def get_positions(
             else:
                 position.current_price = position.buy_price
                 position.price_source = "成本价"
+
+    stock_codes_to_fetch: dict[str, list[Trade]] = {}
+    for position in positions:
+        if (not position.stock_name or position.stock_name.strip() == "") and position.stock_code:
+            stock_codes_to_fetch.setdefault(position.stock_code, []).append(position)
+
+    for stock_code, positions_list in stock_codes_to_fetch.items():
+        fetched_name = await price_monitor.fetch_stock_name(stock_code)
+        if fetched_name:
+            for position in positions_list:
+                position.stock_name = fetched_name
+
+    if stock_codes_to_fetch:
+        await db.commit()
     
     open_ids: list[int] = []
     key_to_open_ids: dict[tuple[str, datetime, float], list[int]] = {}
