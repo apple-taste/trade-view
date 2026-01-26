@@ -8,7 +8,6 @@ import { useAuth } from '../../contexts/AuthContext';
 import { logger } from '../../utils/logger';
 import { perfMonitor } from '../../utils/performance';
 import { useJojoModal } from '../JojoModal';
-import JojolandMascot from '../JojolandMascot';
 import { useNavigate } from 'react-router-dom';
 
 // 北京时间工具函数（UTC+8）
@@ -843,9 +842,6 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
               <span>全部历史</span>
             </button>
           </div>
-        </div>
-        <div className="flex-1 flex justify-center px-2 min-w-0">
-          <JojolandMascot inline />
         </div>
         <div className="flex items-center space-x-1 flex-shrink-0">
           <button

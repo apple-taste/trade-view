@@ -94,10 +94,13 @@ async def register(user_data: UserRegister, db: AsyncSession = Depends(get_db)):
     
     # 创建用户
     password_hash = pwd_context.hash(user_data.password)
+    pro_until = (datetime.utcnow() + timedelta(days=365)).date()
     new_user = User(
         username=user_data.username,
         email=user_data.email,
-        password_hash=password_hash
+        password_hash=password_hash,
+        paid_until=pro_until,
+        plan="pro",
     )
     try:
         db.add(new_user)
