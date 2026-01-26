@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import axios from 'axios';
-import { Plus, Edit, Trash2, Calendar, List, Trash, Loader2, Mic } from 'lucide-react';
+import { Plus, Edit, Trash2, Calendar, List, Trash, Loader2 } from 'lucide-react';
 import { format, addDays, subDays } from 'date-fns';
 import { useTrade } from '../../contexts/TradeContext';
 import { useAlerts } from '../../contexts/AlertContext';
@@ -98,10 +98,6 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
   const tradesCache = useRef<Record<string, Trade[]>>({});
   const [trades, setTrades] = useState<Trade[]>([]);
   const [loading, setLoading] = useState(true);
-  const [voiceRecording, setVoiceRecording] = useState(false);
-  const [lastVoiceTranscript, setLastVoiceTranscript] = useState<string | null>(null);
-  const voiceRecognizerRef = useRef<any>(null);
-  
   // 分页状态
   const [page, setPage] = useState(1);
   const [pageSize] = useState(20);
@@ -200,31 +196,6 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       return `${selectedDate}T${timePart}`;
     }
     return getCurrentBeijingTime();
-  };
-
-  const normalizeVoiceOpenTime = (raw?: string | null): string | null => {
-    if (!raw) return null;
-    const cleaned = raw
-      .trim()
-      .replace(/[，,]/g, ' ')
-      .replace(/\//g, '-')
-      .replace(/\s+/g, ' ');
-    if (!cleaned) return null;
-    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(cleaned)) {
-      return cleaned.slice(0, 16);
-    }
-    const dateTimeMatch = cleaned.match(/^(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{2})$/);
-    if (dateTimeMatch) {
-      const [, year, month, day, hour, minute] = dateTimeMatch;
-      return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute}`;
-    }
-    const dateMatch = cleaned.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-    if (dateMatch) {
-      const [, year, month, day] = dateMatch;
-      const timePart = getCurrentBeijingTime().split('T')[1];
-      return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${timePart}`;
-    }
-    return null;
   };
 
   const [formData, setFormData] = useState({
@@ -344,98 +315,6 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       fetchTrades(true);
     }
   }, [_tradeHistoryRefreshKey, fetchTrades, getCacheKey, selectedDate]);
-
-  const handleVoiceCommand = useCallback(async (transcript: string) => {
-    setLastVoiceTranscript(transcript);
-    try {
-      const response = await axios.post('/api/trades/voice-command', {
-        transcript,
-        strategy_id: effectiveStrategyId ?? undefined,
-        execute: false
-      });
-      const data = response.data;
-      const parsed = data?.parsed || {};
-      if (parsed?.action && parsed.action !== 'open_trade') {
-        alert('语音识别为平仓指令，请在持仓面板操作');
-        return;
-      }
-      const nextStopLossAlert =
-        typeof parsed.stop_loss_alert === 'boolean' ? parsed.stop_loss_alert : Boolean(parsed.stop_loss_price);
-      const nextTakeProfitAlert =
-        typeof parsed.take_profit_alert === 'boolean' ? parsed.take_profit_alert : Boolean(parsed.take_profit_price);
-      const mergedStockCode =
-        parsed.stock_code && parsed.stock_name ? `${parsed.stock_code}-${parsed.stock_name}` : parsed.stock_code || '';
-      const nextOpenTime = normalizeVoiceOpenTime(parsed.open_time) || getSelectedDateBeijingTime();
-      setFormData({
-        stock_code: mergedStockCode,
-        stock_name: parsed.stock_name || '',
-        open_time: nextOpenTime,
-        close_time: '',
-        shares: parsed.shares != null ? String(parsed.shares) : '',
-        risk_per_trade: parsed.risk_per_trade != null ? String(parsed.risk_per_trade) : '',
-        commission: '0',
-        buy_commission: parsed.buy_commission != null ? String(parsed.buy_commission) : '',
-        sell_commission: parsed.sell_commission != null ? String(parsed.sell_commission) : '',
-        buy_price: parsed.buy_price != null ? String(parsed.buy_price) : '',
-        sell_price: '',
-        stop_loss_price: parsed.stop_loss_price != null ? String(parsed.stop_loss_price) : '',
-        take_profit_price: parsed.take_profit_price != null ? String(parsed.take_profit_price) : '',
-        stop_loss_alert: nextStopLossAlert,
-        take_profit_alert: nextTakeProfitAlert,
-        notes: parsed.notes || ''
-      });
-      setSharesManuallySet(parsed.shares != null && Number.isFinite(parsed.shares));
-      setEditingTrade(null);
-      setShowForm(true);
-      createRequestIdRef.current = null;
-      if (data?.message) {
-        alert(data.message);
-      }
-    } catch (error: any) {
-      const msg = error?.response?.data?.detail?.message || error?.response?.data?.detail || '语音指令执行失败';
-      alert(msg);
-    }
-  }, [effectiveStrategyId, getSelectedDateBeijingTime, normalizeVoiceOpenTime]);
-
-  const toggleVoiceRecognition = useCallback(async () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert('当前浏览器不支持语音识别');
-      return;
-    }
-    if (!voiceRecording) {
-      const canCreate = await ensureCanCreateTrade();
-      if (!canCreate) return;
-    }
-    if (voiceRecording) {
-      if (voiceRecognizerRef.current) {
-        voiceRecognizerRef.current.stop();
-      }
-      return;
-    }
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'zh-CN';
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-    recognition.onstart = () => setVoiceRecording(true);
-    recognition.onerror = () => {
-      setVoiceRecording(false);
-      alert('语音识别失败');
-    };
-    recognition.onend = () => {
-      setVoiceRecording(false);
-    };
-    recognition.onresult = async (event: any) => {
-      const transcript = event?.results?.[0]?.[0]?.transcript?.trim();
-      if (transcript) {
-        await handleVoiceCommand(transcript);
-      } else {
-        alert('未识别到语音内容');
-      }
-    };
-    voiceRecognizerRef.current = recognition;
-    recognition.start();
-  }, [ensureCanCreateTrade, handleVoiceCommand, voiceRecording]);
 
   const fetchStockCodes = async () => {
     try {
@@ -965,16 +844,6 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
         </div>
         <div className="flex items-center space-x-1 flex-shrink-0">
           <button
-            onClick={toggleVoiceRecognition}
-            className={`jojo-button flex items-center space-x-1 text-xs px-2 py-1 ${
-              voiceRecording ? 'bg-red-800/60 border-red-500 text-red-200' : ''
-            }`}
-            title={voiceRecording ? '停止语音识别' : '语音输入'}
-          >
-            <Mic size={14} />
-            <span>{voiceRecording ? '录音中' : '语音'}</span>
-          </button>
-          <button
             onClick={async () => {
               const canCreate = await ensureCanCreateTrade();
               if (!canCreate) return;
@@ -1001,11 +870,6 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       </div>
 
       {/* 显示当前查看模式 */}
-      {lastVoiceTranscript && (
-        <div className="mb-2 p-1 bg-jojo-blue-light rounded text-xs text-gray-300">
-          语音识别: <span className="text-jojo-gold">{lastVoiceTranscript}</span>
-        </div>
-      )}
       {viewMode === 'date' && (
         <div className="mb-2 p-1 bg-jojo-blue-light rounded text-xs text-gray-300">
           查看日期: {new Date(selectedDate).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })}

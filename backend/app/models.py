@@ -317,40 +317,6 @@ class ClosePositionRequest(BaseModel):
     shares: Optional[int] = None
     order_result: Optional[str] = None
 
-class VoiceCommandRequest(BaseModel):
-    transcript: str
-    strategy_id: Optional[int] = None
-    action_hint: Optional[str] = None
-    execute: Optional[bool] = True
-
-class VoiceCommandParsed(BaseModel):
-    action: str
-    position_id: Optional[int] = None
-    stock_code: Optional[str] = None
-    stock_name: Optional[str] = None
-    shares: Optional[int] = None
-    buy_price: Optional[float] = None
-    open_time: Optional[str] = None
-    buy_commission: Optional[float] = None
-    sell_commission: Optional[float] = None
-    sell_price: Optional[float] = None
-    stop_loss_price: Optional[float] = None
-    take_profit_price: Optional[float] = None
-    stop_loss_alert: Optional[bool] = None
-    take_profit_alert: Optional[bool] = None
-    close_type: Optional[str] = None
-    close_date: Optional[str] = None
-    notes: Optional[str] = None
-    risk_per_trade: Optional[float] = None
-    confidence: Optional[float] = None
-
-class VoiceCommandResponse(BaseModel):
-    action: str
-    executed: bool
-    parsed: VoiceCommandParsed
-    trade: Optional[TradeResponse] = None
-    message: Optional[str] = None
-
 # AI分析相关
 class AnalysisSummary(BaseModel):
     totalTrades: int
