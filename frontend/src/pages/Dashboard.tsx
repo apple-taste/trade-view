@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, lazy, Suspense } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useAlerts } from '../contexts/AlertContext';
 import { useLocale } from '../contexts/LocaleContext';
@@ -6,12 +6,13 @@ import UserPanel from '../components/panels/UserPanel';
 import CalendarPanel from '../components/panels/CalendarPanel';
 import TradeHistoryPanel from '../components/panels/TradeHistoryPanel';
 import PositionPanel from '../components/panels/PositionPanel';
-import AnalysisPanel from '../components/panels/AnalysisPanel';
 import AlertPanel from '../components/panels/AlertPanel';
-import ForexDashboard from './ForexDashboard';
 import { LogOut, TrendingUp, Globe, RotateCcw, Languages } from 'lucide-react';
 import { Panel, PanelGroup, ImperativePanelGroupHandle } from "react-resizable-panels";
 import ResizeHandle from '../components/common/ResizeHandle';
+
+const AnalysisPanel = lazy(() => import('../components/panels/AnalysisPanel'));
+const ForexDashboard = lazy(() => import('./ForexDashboard'));
 
 const DEFAULT_LAYOUT = {
   main: [30, 70],
@@ -262,10 +263,12 @@ export default function Dashboard() {
                  {/* 第三行：AI分析 */}
                  <Panel defaultSize={70} minSize={6}>
                    <div className={`h-full pt-1 ${isAnalysisMinimized ? 'overflow-hidden' : 'overflow-y-auto custom-scrollbar'}`}>
-                     <AnalysisPanel 
-                       isMinimized={isAnalysisMinimized}
-                       onToggleMinimize={handleToggleAnalysis}
-                     />
+                     <Suspense fallback={<div className="h-full flex items-center justify-center text-xs text-gray-400">加载中...</div>}>
+                       <AnalysisPanel 
+                         isMinimized={isAnalysisMinimized}
+                         onToggleMinimize={handleToggleAnalysis}
+                       />
+                     </Suspense>
                    </div>
                  </Panel>
               </PanelGroup>
@@ -274,7 +277,9 @@ export default function Dashboard() {
         </div>
       ) : (
         <div className="flex-grow min-h-0">
-          <ForexDashboard />
+          <Suspense fallback={<div className="h-full flex items-center justify-center text-xs text-gray-400">加载中...</div>}>
+            <ForexDashboard />
+          </Suspense>
         </div>
       )}
       </div>

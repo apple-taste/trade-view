@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import axios from 'axios';
-import { Plus, Edit, Trash2, Calendar, List, Trash, Loader2 } from 'lucide-react';
+import { Plus, Edit, Trash2, Calendar, List, Trash, Loader2, Mic } from 'lucide-react';
 import { format, addDays, subDays } from 'date-fns';
 import { useTrade } from '../../contexts/TradeContext';
 import { useAlerts } from '../../contexts/AlertContext';
@@ -98,6 +98,9 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
   const tradesCache = useRef<Record<string, Trade[]>>({});
   const [trades, setTrades] = useState<Trade[]>([]);
   const [loading, setLoading] = useState(true);
+  const [voiceRecording, setVoiceRecording] = useState(false);
+  const [lastVoiceTranscript, setLastVoiceTranscript] = useState<string | null>(null);
+  const voiceRecognizerRef = useRef<any>(null);
   
   // 分页状态
   const [page, setPage] = useState(1);
@@ -316,6 +319,80 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       fetchTrades(true);
     }
   }, [_tradeHistoryRefreshKey, fetchTrades, getCacheKey, selectedDate]);
+
+  const handleVoiceCommand = useCallback(async (transcript: string) => {
+    setLastVoiceTranscript(transcript);
+    try {
+      const response = await axios.post('/api/trades/voice-command', {
+        transcript,
+        strategy_id: effectiveStrategyId ?? undefined,
+        execute: true
+      });
+      const data = response.data;
+      if (data?.trade) {
+        if (data.action === 'open_trade') {
+          setLastAddedTrade(data.trade);
+        } else if (data.action === 'close_position') {
+          setLastUpdatedTrade(data.trade);
+        }
+      }
+      if (data?.executed) {
+        await Promise.all([
+          fetchTrades(true),
+          refreshCalendar(),
+          refreshPositions(),
+          refreshAnalysis(),
+          refreshUserPanel()
+        ]);
+      }
+      if (data?.message) {
+        alert(data.message);
+      }
+    } catch (error: any) {
+      const msg = error?.response?.data?.detail?.message || error?.response?.data?.detail || '语音指令执行失败';
+      alert(msg);
+    }
+  }, [effectiveStrategyId, fetchTrades, refreshAnalysis, refreshCalendar, refreshPositions, refreshUserPanel, setLastAddedTrade, setLastUpdatedTrade]);
+
+  const toggleVoiceRecognition = useCallback(async () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert('当前浏览器不支持语音识别');
+      return;
+    }
+    if (!voiceRecording) {
+      const canCreate = await ensureCanCreateTrade();
+      if (!canCreate) return;
+    }
+    if (voiceRecording) {
+      if (voiceRecognizerRef.current) {
+        voiceRecognizerRef.current.stop();
+      }
+      return;
+    }
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'zh-CN';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.onstart = () => setVoiceRecording(true);
+    recognition.onerror = () => {
+      setVoiceRecording(false);
+      alert('语音识别失败');
+    };
+    recognition.onend = () => {
+      setVoiceRecording(false);
+    };
+    recognition.onresult = async (event: any) => {
+      const transcript = event?.results?.[0]?.[0]?.transcript?.trim();
+      if (transcript) {
+        await handleVoiceCommand(transcript);
+      } else {
+        alert('未识别到语音内容');
+      }
+    };
+    voiceRecognizerRef.current = recognition;
+    recognition.start();
+  }, [ensureCanCreateTrade, handleVoiceCommand, voiceRecording]);
 
   const fetchStockCodes = async () => {
     try {
@@ -845,6 +922,16 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
         </div>
         <div className="flex items-center space-x-1 flex-shrink-0">
           <button
+            onClick={toggleVoiceRecognition}
+            className={`jojo-button flex items-center space-x-1 text-xs px-2 py-1 ${
+              voiceRecording ? 'bg-red-800/60 border-red-500 text-red-200' : ''
+            }`}
+            title={voiceRecording ? '停止语音识别' : '语音输入'}
+          >
+            <Mic size={14} />
+            <span>{voiceRecording ? '录音中' : '语音'}</span>
+          </button>
+          <button
             onClick={async () => {
               const canCreate = await ensureCanCreateTrade();
               if (!canCreate) return;
@@ -871,6 +958,11 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       </div>
 
       {/* 显示当前查看模式 */}
+      {lastVoiceTranscript && (
+        <div className="mb-2 p-1 bg-jojo-blue-light rounded text-xs text-gray-300">
+          语音识别: <span className="text-jojo-gold">{lastVoiceTranscript}</span>
+        </div>
+      )}
       {viewMode === 'date' && (
         <div className="mb-2 p-1 bg-jojo-blue-light rounded text-xs text-gray-300">
           查看日期: {new Date(selectedDate).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })}

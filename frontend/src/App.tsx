@@ -1,15 +1,23 @@
+import { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { TradeProvider } from './contexts/TradeContext';
 import { AlertProvider } from './contexts/AlertContext';
 import { LocaleProvider } from './contexts/LocaleContext';
-import Login from './pages/Login';
-import AdminLogin from './pages/AdminLogin';
-import AdminDashboard from './pages/AdminDashboard';
-import Dashboard from './pages/Dashboard';
-import Billing from './pages/Billing';
 import PrivateRoute from './components/PrivateRoute';
 import AdminPrivateRoute from './components/AdminPrivateRoute';
+
+const Login = lazy(() => import('./pages/Login'));
+const AdminLogin = lazy(() => import('./pages/AdminLogin'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Billing = lazy(() => import('./pages/Billing'));
+
+const fallback = (
+  <div className="min-h-screen flex items-center justify-center text-gray-400 text-sm">
+    加载中...
+  </div>
+);
 
 function App() {
   return (
@@ -24,21 +32,39 @@ function App() {
               }}
             >
               <Routes>
-                <Route path="/login" element={<Login />} />
+                <Route
+                  path="/login"
+                  element={
+                    <Suspense fallback={fallback}>
+                      <Login />
+                    </Suspense>
+                  }
+                />
                 <Route
                   path="/billing"
                   element={
                     <PrivateRoute>
-                      <Billing />
+                      <Suspense fallback={fallback}>
+                        <Billing />
+                      </Suspense>
                     </PrivateRoute>
                   }
                 />
-                <Route path="/admin/login" element={<AdminLogin />} />
+                <Route
+                  path="/admin/login"
+                  element={
+                    <Suspense fallback={fallback}>
+                      <AdminLogin />
+                    </Suspense>
+                  }
+                />
                 <Route
                   path="/admin/*"
                   element={
                     <AdminPrivateRoute>
-                      <AdminDashboard />
+                      <Suspense fallback={fallback}>
+                        <AdminDashboard />
+                      </Suspense>
                     </AdminPrivateRoute>
                   }
                 />
@@ -46,7 +72,9 @@ function App() {
                   path="/*"
                   element={
                     <PrivateRoute>
-                      <Dashboard />
+                      <Suspense fallback={fallback}>
+                        <Dashboard />
+                      </Suspense>
                     </PrivateRoute>
                   }
                 />

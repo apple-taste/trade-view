@@ -34,6 +34,151 @@ class AIAnalyzer:
         self.base_url = "https://space.ai-builders.com/backend"
         self.chat_url = f"{self.base_url}/v1/chat/completions"
     
+    async def parse_voice_command(self, transcript: str, action_hint: Optional[str] = None) -> Dict[str, Any]:
+        if not transcript or not isinstance(transcript, str):
+            return self._basic_parse_voice("", action_hint)
+        if not self.api_key:
+            return self._basic_parse_voice(transcript, action_hint)
+        payload = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是交易语音助手。"
+                        "从中文自然语言中提取结构化交易指令。"
+                        "只返回一个JSON对象，字段如下："
+                        "{"
+                        "\"action\":\"open_trade|close_position\","
+                        "\"position_id\":数字或null,"
+                        "\"stock_code\":\"六位股票代码\","
+                        "\"stock_name\":\"可选\","
+                        "\"shares\":整数或null,"
+                        "\"buy_price\":数字或null,"
+                        "\"sell_price\":数字或null,"
+                        "\"stop_loss_price\":数字或null,"
+                        "\"take_profit_price\":数字或null,"
+                        "\"close_type\":\"take_profit|stop_loss|auto|null\","
+                        "\"close_date\":\"YYYY-MM-DD或null\","
+                        "\"notes\":\"可选\","
+                        "\"risk_per_trade\":数字或null,"
+                        "\"confidence\":0-1之间"
+                        "}"
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": f"action_hint={action_hint or ''}; transcript={transcript}"
+                }
+            ],
+            "temperature": 1.0,
+            "max_tokens": 800
+        }
+        try:
+            connector = aiohttp.TCPConnector(ssl=ssl_context) if ssl_context else None
+            async with aiohttp.ClientSession(connector=connector) as session:
+                headers = {
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json"
+                }
+                async with session.post(
+                    self.chat_url,
+                    headers=headers,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=40)
+                ) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        ai_response = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                        parsed = self._parse_voice_json(ai_response, action_hint)
+                        return parsed
+                    else:
+                        return self._basic_parse_voice(transcript, action_hint)
+        except Exception:
+            return self._basic_parse_voice(transcript, action_hint)
+    
+    def _parse_voice_json(self, ai_response: str, action_hint: Optional[str]) -> Dict[str, Any]:
+        try:
+            m = re.search(r'\{[\s\S]*\}', ai_response)
+            if m:
+                obj = json.loads(m.group())
+                for k in [
+                    "action","position_id","stock_code","stock_name","shares","buy_price","sell_price",
+                    "stop_loss_price","take_profit_price","close_type","close_date",
+                    "notes","risk_per_trade","confidence"
+                ]:
+                    obj.setdefault(k, None if k != "action" else (action_hint or "open_trade"))
+                if not obj.get("action"):
+                    obj["action"] = action_hint or "open_trade"
+                return obj
+        except Exception:
+            pass
+        return self._basic_parse_voice(ai_response or "", action_hint)
+    
+    def _basic_parse_voice(self, transcript: str, action_hint: Optional[str] = None) -> Dict[str, Any]:
+        text = (transcript or "").strip()
+        stock_code = None
+        shares = None
+        buy_price = None
+        sell_price = None
+        sl = None
+        tp = None
+        close_type = None
+        risk_per_trade = None
+        m = re.search(r'(\d{6})', text)
+        if m:
+            stock_code = m.group(1)
+        m = re.search(r'(\d+(?:\.\d+)?)\s*元?\s*(?:买入|开仓|买)', text)
+        if m:
+            buy_price = float(m.group(1))
+        m = re.search(r'(\d+(?:\.\d+)?)\s*元?\s*(?:卖出|平仓|卖)', text)
+        if m:
+            sell_price = float(m.group(1))
+        m = re.search(r'(?:止损|SL)\s*(\d+(?:\.\d+)?)', text)
+        if m:
+            sl = float(m.group(1))
+        m = re.search(r'(?:止盈|TP)\s*(\d+(?:\.\d+)?)', text)
+        if m:
+            tp = float(m.group(1))
+        m = re.search(r'(\d+)\s*股', text)
+        if m:
+            shares = int(m.group(1))
+        else:
+            m = re.search(r'(\d+)\s*手', text)
+            if m:
+                shares = int(m.group(1)) * 100
+        m = re.search(r'(?:风险|单笔风险)\s*(\d+(?:\.\d+)?)', text)
+        if m:
+            risk_per_trade = float(m.group(1))
+        if re.search(r'止盈', text):
+            close_type = "take_profit"
+        elif re.search(r'止损', text):
+            close_type = "stop_loss"
+        action = None
+        if action_hint:
+            action = action_hint
+        else:
+            if re.search(r'(平仓|卖出|止盈|止损)', text):
+                action = "close_position"
+            else:
+                action = "open_trade"
+        return {
+            "action": action,
+            "position_id": None,
+            "stock_code": stock_code,
+            "stock_name": None,
+            "shares": shares,
+            "buy_price": buy_price,
+            "sell_price": sell_price,
+            "stop_loss_price": sl,
+            "take_profit_price": tp,
+            "close_type": close_type or "auto",
+            "close_date": None,
+            "notes": None,
+            "risk_per_trade": risk_per_trade,
+            "confidence": 0.5
+        }
+    
     async def analyze_trades_with_ai(self, trades_data: List[Dict[str, Any]], capital_history: Optional[List[Dict]] = None) -> Dict[str, Any]:
         """使用ChatGPT-5分析交易数据（通过AI Builder Space中转）"""
         logger.info("=" * 80)

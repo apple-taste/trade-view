@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, distinct
+from sqlalchemy import select, func, distinct, desc
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime, date, timedelta, timezone
 import asyncio
@@ -10,11 +10,13 @@ logger = logging.getLogger(__name__)
 
 from app.database import get_db, Trade, CapitalHistory, AsyncSessionLocal
 from app.middleware.auth import get_current_user, billing_enabled, user_has_active_subscription
-from app.models import TradeCreate, TradeUpdate, TradeResponse, PaginatedTradeResponse
+from app.models import TradeCreate, TradeUpdate, TradeResponse, PaginatedTradeResponse, VoiceCommandRequest, VoiceCommandResponse, VoiceCommandParsed, TakeProfitRequest, StopLossRequest
 from app.database import User
 from app.routers.user import recalculate_capital_history, recalculate_strategy_capital_history, _get_stock_strategy
 from app.services.commission_calculator import default_calculator
 from app.services.price_monitor import price_monitor
+from app.services.ai_analyzer import ai_analyzer
+from app.routers.positions import take_profit as take_profit_position, stop_loss as stop_loss_position
 
 router = APIRouter()
 
@@ -280,6 +282,10 @@ async def create_trade(
             if right.strip():
                 stock_name = right.strip()
             stock_code = left.strip()
+    if (not stock_name or stock_name.strip() == "") and stock_code:
+        fetched_name = await price_monitor.fetch_stock_name(stock_code)
+        if fetched_name:
+            stock_name = fetched_name
 
     # 处理open_time：如果有时区信息，转换为naive UTC时间
     if trade_data.open_time:
@@ -984,3 +990,143 @@ async def get_trades_by_stock_code(
     except Exception as e:
         logger.error(f"获取股票 {stock_code} 的交易记录失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取交易记录失败: {str(e)}")
+
+@router.post(
+    "/voice-command",
+    response_model=VoiceCommandResponse,
+    summary="语音指令创建/平仓",
+    description="""
+    解析语音文本指令并执行开仓或平仓操作。
+    
+    支持字段：
+    - transcript: 语音识别文本
+    - strategy_id: 可选策略ID
+    - action_hint: 可选动作提示(open_trade/close_position)
+    - execute: 是否执行（false时仅解析）
+    """,
+)
+async def voice_command(
+    payload: VoiceCommandRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    if billing_enabled() and not user_has_active_subscription(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "BILLING_REQUIRED", "message": "非Pro会员无法使用语音指令，请先开通Pro会员"},
+        )
+    transcript = (payload.transcript or "").strip()
+    if not transcript:
+        raise HTTPException(status_code=400, detail="语音内容为空")
+    strategy = await _get_stock_strategy(db, current_user, payload.strategy_id)
+    parsed_raw = await ai_analyzer.parse_voice_command(transcript, payload.action_hint)
+    parsed_fields = {}
+    for k in VoiceCommandParsed.__fields__.keys():
+        if isinstance(parsed_raw, dict) and k in parsed_raw:
+            parsed_fields[k] = parsed_raw.get(k)
+    if "action" not in parsed_fields:
+        parsed_fields["action"] = payload.action_hint or "open_trade"
+    parsed = VoiceCommandParsed(**parsed_fields)
+    action = (parsed.action or payload.action_hint or "open_trade").strip().lower()
+    if action in ["open", "open_trade", "buy", "buy_trade", "开仓", "买入"]:
+        action = "open_trade"
+    elif action in ["close", "close_position", "sell", "sell_trade", "平仓", "卖出", "止盈", "止损"]:
+        action = "close_position"
+    parsed.action = action
+    if payload.execute is False:
+        return VoiceCommandResponse(action=action, executed=False, parsed=parsed, trade=None, message="已解析语音指令，未执行操作")
+    if action == "open_trade":
+        if not parsed.stock_code:
+            return VoiceCommandResponse(action=action, executed=False, parsed=parsed, trade=None, message="未识别股票代码")
+        if parsed.buy_price is None:
+            return VoiceCommandResponse(action=action, executed=False, parsed=parsed, trade=None, message="未识别买入价格")
+        if parsed.shares is None and parsed.risk_per_trade is None:
+            return VoiceCommandResponse(action=action, executed=False, parsed=parsed, trade=None, message="未识别手数或单笔风险")
+        trade_data = TradeCreate(
+            stock_code=parsed.stock_code,
+            stock_name=parsed.stock_name,
+            shares=parsed.shares,
+            buy_price=parsed.buy_price,
+            stop_loss_price=parsed.stop_loss_price,
+            take_profit_price=parsed.take_profit_price,
+            stop_loss_alert=True if parsed.stop_loss_price is not None else False,
+            take_profit_alert=True if parsed.take_profit_price is not None else False,
+            notes=parsed.notes,
+            risk_per_trade=parsed.risk_per_trade,
+            strategy_id=strategy.id
+        )
+        trade = await create_trade(trade_data, current_user, db)
+        return VoiceCommandResponse(action=action, executed=True, parsed=parsed, trade=trade, message="开仓已创建")
+    if action == "close_position":
+        position = None
+        if parsed.position_id is not None:
+            result = await db.execute(
+                select(Trade).where(
+                    Trade.id == parsed.position_id,
+                    Trade.user_id == current_user.id,
+                    Trade.strategy_id == strategy.id,
+                    Trade.status == "open",
+                    Trade.is_deleted == False
+                )
+            )
+            position = result.scalar_one_or_none()
+        else:
+            stock_code = parsed.stock_code or ""
+            if "-" in stock_code:
+                stock_code = stock_code.split("-", 1)[0].strip()
+            if " " in stock_code:
+                stock_code = stock_code.split(" ", 1)[0].strip()
+            if stock_code:
+                result = await db.execute(
+                    select(Trade)
+                    .where(
+                        Trade.user_id == current_user.id,
+                        Trade.strategy_id == strategy.id,
+                        Trade.status == "open",
+                        Trade.is_deleted == False,
+                        Trade.stock_code == stock_code
+                    )
+                    .order_by(desc(Trade.open_time))
+                )
+                position = result.scalars().first()
+            elif parsed.stock_name:
+                result = await db.execute(
+                    select(Trade)
+                    .where(
+                        Trade.user_id == current_user.id,
+                        Trade.strategy_id == strategy.id,
+                        Trade.status == "open",
+                        Trade.is_deleted == False,
+                        Trade.stock_name == parsed.stock_name
+                    )
+                    .order_by(desc(Trade.open_time))
+                )
+                position = result.scalars().first()
+        if position is None:
+            return VoiceCommandResponse(action=action, executed=False, parsed=parsed, trade=None, message="未找到可平仓的持仓")
+        if parsed.sell_price is None:
+            return VoiceCommandResponse(action=action, executed=False, parsed=parsed, trade=None, message="未识别卖出价格")
+        close_type = (parsed.close_type or "auto").strip().lower()
+        if close_type in ["close", "auto", ""]:
+            if position.buy_price is not None and parsed.sell_price is not None:
+                close_type = "take_profit" if parsed.sell_price >= position.buy_price else "stop_loss"
+            else:
+                close_type = "take_profit"
+        if close_type not in ["take_profit", "stop_loss"]:
+            close_type = "take_profit"
+        if close_type == "take_profit":
+            request_data = TakeProfitRequest(
+                sell_price=parsed.sell_price,
+                close_date=parsed.close_date,
+                shares=parsed.shares
+            )
+            trade = await take_profit_position(position.id, request_data, current_user, db)
+        else:
+            request_data = StopLossRequest(
+                sell_price=parsed.sell_price,
+                close_date=parsed.close_date,
+                shares=parsed.shares
+            )
+            trade = await stop_loss_position(position.id, request_data, current_user, db)
+        return VoiceCommandResponse(action=action, executed=True, parsed=parsed, trade=trade, message="平仓已执行")
+    return VoiceCommandResponse(action=action, executed=False, parsed=parsed, trade=None, message="未识别操作类型")
