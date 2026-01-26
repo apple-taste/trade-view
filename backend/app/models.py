@@ -330,9 +330,14 @@ class VoiceCommandParsed(BaseModel):
     stock_name: Optional[str] = None
     shares: Optional[int] = None
     buy_price: Optional[float] = None
+    open_time: Optional[str] = None
+    buy_commission: Optional[float] = None
+    sell_commission: Optional[float] = None
     sell_price: Optional[float] = None
     stop_loss_price: Optional[float] = None
     take_profit_price: Optional[float] = None
+    stop_loss_alert: Optional[bool] = None
+    take_profit_alert: Optional[bool] = None
     close_type: Optional[str] = None
     close_date: Optional[str] = None
     notes: Optional[str] = None

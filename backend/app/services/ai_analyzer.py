@@ -55,9 +55,14 @@ class AIAnalyzer:
                         "\"stock_name\":\"可选\","
                         "\"shares\":整数或null,"
                         "\"buy_price\":数字或null,"
+                        "\"open_time\":\"YYYY-MM-DD HH:mm 或 YYYY/MM/DD HH:mm 或 null\","
+                        "\"buy_commission\":数字或null,"
+                        "\"sell_commission\":数字或null,"
                         "\"sell_price\":数字或null,"
                         "\"stop_loss_price\":数字或null,"
                         "\"take_profit_price\":数字或null,"
+                        "\"stop_loss_alert\":true|false|null,"
+                        "\"take_profit_alert\":true|false|null,"
                         "\"close_type\":\"take_profit|stop_loss|auto|null\","
                         "\"close_date\":\"YYYY-MM-DD或null\","
                         "\"notes\":\"可选\","
@@ -104,7 +109,8 @@ class AIAnalyzer:
                 obj = json.loads(m.group())
                 for k in [
                     "action","position_id","stock_code","stock_name","shares","buy_price","sell_price",
-                    "stop_loss_price","take_profit_price","close_type","close_date",
+                    "open_time","buy_commission","sell_commission","stop_loss_price","take_profit_price",
+                    "stop_loss_alert","take_profit_alert","close_type","close_date",
                     "notes","risk_per_trade","confidence"
                 ]:
                     obj.setdefault(k, None if k != "action" else (action_hint or "open_trade"))
@@ -118,19 +124,36 @@ class AIAnalyzer:
     def _basic_parse_voice(self, transcript: str, action_hint: Optional[str] = None) -> Dict[str, Any]:
         text = (transcript or "").strip()
         stock_code = None
+        stock_name = None
         shares = None
         buy_price = None
+        open_time = None
+        buy_commission = None
+        sell_commission = None
         sell_price = None
         sl = None
         tp = None
+        stop_loss_alert = None
+        take_profit_alert = None
         close_type = None
         risk_per_trade = None
+        notes = None
         m = re.search(r'(\d{6})', text)
         if m:
             stock_code = m.group(1)
+        m = re.search(r'(\d{6})\s*[-—]\s*([A-Za-z\u4e00-\u9fa5]+)', text)
+        if m:
+            stock_code = m.group(1)
+            stock_name = m.group(2)
         m = re.search(r'(\d+(?:\.\d+)?)\s*元?\s*(?:买入|开仓|买)', text)
         if m:
             buy_price = float(m.group(1))
+        m = re.search(r'(?:买入手续费|买入费|买入佣金)\s*(\d+(?:\.\d+)?)', text)
+        if m:
+            buy_commission = float(m.group(1))
+        m = re.search(r'(?:卖出手续费|卖出费|卖出佣金)\s*(\d+(?:\.\d+)?)', text)
+        if m:
+            sell_commission = float(m.group(1))
         m = re.search(r'(\d+(?:\.\d+)?)\s*元?\s*(?:卖出|平仓|卖)', text)
         if m:
             sell_price = float(m.group(1))
@@ -140,6 +163,18 @@ class AIAnalyzer:
         m = re.search(r'(?:止盈|TP)\s*(\d+(?:\.\d+)?)', text)
         if m:
             tp = float(m.group(1))
+        m = re.search(r'(?:止损(?:提醒|闹铃|警报)|止损提醒)\s*(开|开|true|是|启用|打开)', text)
+        if m:
+            stop_loss_alert = True
+        m = re.search(r'(?:止损(?:提醒|闹铃|警报)|止损提醒)\s*(关|false|否|关闭|禁用)', text)
+        if m:
+            stop_loss_alert = False
+        m = re.search(r'(?:止盈(?:提醒|闹铃|警报)|止盈提醒)\s*(开|开|true|是|启用|打开)', text)
+        if m:
+            take_profit_alert = True
+        m = re.search(r'(?:止盈(?:提醒|闹铃|警报)|止盈提醒)\s*(关|false|否|关闭|禁用)', text)
+        if m:
+            take_profit_alert = False
         m = re.search(r'(\d+)\s*股', text)
         if m:
             shares = int(m.group(1))
@@ -147,9 +182,22 @@ class AIAnalyzer:
             m = re.search(r'(\d+)\s*手', text)
             if m:
                 shares = int(m.group(1)) * 100
+        m = re.search(r'(\d{4})[/-](\d{1,2})[/-](\d{1,2})[，,\s]*(\d{1,2}):(\d{2})', text)
+        if m:
+            year, month, day, hour, minute = m.groups()
+            open_time = f"{year.zfill(4)}-{month.zfill(2)}-{day.zfill(2)}T{hour.zfill(2)}:{minute}"
+        m = re.search(r'(\d{4})[/-](\d{1,2})[/-](\d{1,2})', text)
+        if m and open_time is None:
+            year, month, day = m.groups()
+            open_time = f"{year.zfill(4)}-{month.zfill(2)}-{day.zfill(2)}"
         m = re.search(r'(?:风险|单笔风险)\s*(\d+(?:\.\d+)?)', text)
         if m:
             risk_per_trade = float(m.group(1))
+        m = re.search(r'(?:备注|说明|原因)[:：]?\s*([^，。]+)', text)
+        if m:
+            notes = m.group(1).strip()
+        else:
+            notes = None
         if re.search(r'止盈', text):
             close_type = "take_profit"
         elif re.search(r'止损', text):
@@ -166,15 +214,20 @@ class AIAnalyzer:
             "action": action,
             "position_id": None,
             "stock_code": stock_code,
-            "stock_name": None,
+            "stock_name": stock_name,
             "shares": shares,
             "buy_price": buy_price,
+            "open_time": open_time,
+            "buy_commission": buy_commission,
+            "sell_commission": sell_commission,
             "sell_price": sell_price,
             "stop_loss_price": sl,
             "take_profit_price": tp,
+            "stop_loss_alert": stop_loss_alert,
+            "take_profit_alert": take_profit_alert,
             "close_type": close_type or "auto",
             "close_date": None,
-            "notes": None,
+            "notes": notes,
             "risk_per_trade": risk_per_trade,
             "confidence": 0.5
         }

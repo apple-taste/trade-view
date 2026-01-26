@@ -202,6 +202,31 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
     return getCurrentBeijingTime();
   };
 
+  const normalizeVoiceOpenTime = (raw?: string | null): string | null => {
+    if (!raw) return null;
+    const cleaned = raw
+      .trim()
+      .replace(/[，,]/g, ' ')
+      .replace(/\//g, '-')
+      .replace(/\s+/g, ' ');
+    if (!cleaned) return null;
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(cleaned)) {
+      return cleaned.slice(0, 16);
+    }
+    const dateTimeMatch = cleaned.match(/^(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{2})$/);
+    if (dateTimeMatch) {
+      const [, year, month, day, hour, minute] = dateTimeMatch;
+      return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute}`;
+    }
+    const dateMatch = cleaned.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (dateMatch) {
+      const [, year, month, day] = dateMatch;
+      const timePart = getCurrentBeijingTime().split('T')[1];
+      return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${timePart}`;
+    }
+    return null;
+  };
+
   const [formData, setFormData] = useState({
     stock_code: '',
     stock_name: '',
@@ -326,25 +351,43 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       const response = await axios.post('/api/trades/voice-command', {
         transcript,
         strategy_id: effectiveStrategyId ?? undefined,
-        execute: true
+        execute: false
       });
       const data = response.data;
-      if (data?.trade) {
-        if (data.action === 'open_trade') {
-          setLastAddedTrade(data.trade);
-        } else if (data.action === 'close_position') {
-          setLastUpdatedTrade(data.trade);
-        }
+      const parsed = data?.parsed || {};
+      if (parsed?.action && parsed.action !== 'open_trade') {
+        alert('语音识别为平仓指令，请在持仓面板操作');
+        return;
       }
-      if (data?.executed) {
-        await Promise.all([
-          fetchTrades(true),
-          refreshCalendar(),
-          refreshPositions(),
-          refreshAnalysis(),
-          refreshUserPanel()
-        ]);
-      }
+      const nextStopLossAlert =
+        typeof parsed.stop_loss_alert === 'boolean' ? parsed.stop_loss_alert : Boolean(parsed.stop_loss_price);
+      const nextTakeProfitAlert =
+        typeof parsed.take_profit_alert === 'boolean' ? parsed.take_profit_alert : Boolean(parsed.take_profit_price);
+      const mergedStockCode =
+        parsed.stock_code && parsed.stock_name ? `${parsed.stock_code}-${parsed.stock_name}` : parsed.stock_code || '';
+      const nextOpenTime = normalizeVoiceOpenTime(parsed.open_time) || getSelectedDateBeijingTime();
+      setFormData({
+        stock_code: mergedStockCode,
+        stock_name: parsed.stock_name || '',
+        open_time: nextOpenTime,
+        close_time: '',
+        shares: parsed.shares != null ? String(parsed.shares) : '',
+        risk_per_trade: parsed.risk_per_trade != null ? String(parsed.risk_per_trade) : '',
+        commission: '0',
+        buy_commission: parsed.buy_commission != null ? String(parsed.buy_commission) : '',
+        sell_commission: parsed.sell_commission != null ? String(parsed.sell_commission) : '',
+        buy_price: parsed.buy_price != null ? String(parsed.buy_price) : '',
+        sell_price: '',
+        stop_loss_price: parsed.stop_loss_price != null ? String(parsed.stop_loss_price) : '',
+        take_profit_price: parsed.take_profit_price != null ? String(parsed.take_profit_price) : '',
+        stop_loss_alert: nextStopLossAlert,
+        take_profit_alert: nextTakeProfitAlert,
+        notes: parsed.notes || ''
+      });
+      setSharesManuallySet(parsed.shares != null && Number.isFinite(parsed.shares));
+      setEditingTrade(null);
+      setShowForm(true);
+      createRequestIdRef.current = null;
       if (data?.message) {
         alert(data.message);
       }
@@ -352,7 +395,7 @@ export default function TradeHistoryPanel({ selectedDate }: TradeHistoryPanelPro
       const msg = error?.response?.data?.detail?.message || error?.response?.data?.detail || '语音指令执行失败';
       alert(msg);
     }
-  }, [effectiveStrategyId, fetchTrades, refreshAnalysis, refreshCalendar, refreshPositions, refreshUserPanel, setLastAddedTrade, setLastUpdatedTrade]);
+  }, [effectiveStrategyId, getSelectedDateBeijingTime, normalizeVoiceOpenTime]);
 
   const toggleVoiceRecognition = useCallback(async () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
