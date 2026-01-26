@@ -592,7 +592,6 @@ export default function PositionPanel() {
                     <div className="font-bold text-jojo-gold text-sm">
                       {position.stock_code}
                       {position.stock_name && <span className="text-white"> - {position.stock_name}</span>}
-                      {position.open_trade_id != null && <span className="text-gray-300"> #{position.open_trade_id}</span>}
                     </div>
                     <div className={`text-right ${realizedProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                         <div className="text-[10px] text-gray-400">平仓盈亏</div>
@@ -613,9 +612,6 @@ export default function PositionPanel() {
                     </div>
                     <div>
                       <span className="text-gray-400">剩余股数:</span> {position.shares}
-                    </div>
-                    <div>
-                      <span className="text-gray-400">开仓ID:</span> {position.open_trade_id ?? position.id}
                     </div>
                     <div>
                       <span className="text-gray-400">买入价:</span> ¥{position.buy_price.toFixed(2)}
