@@ -126,7 +126,7 @@ export default function Dashboard() {
           <div className="flex items-center space-x-4">
             <div className="flex items-center space-x-2">
               <h1 className="jojo-title text-2xl">{t('app.title')}</h1>
-              <span className="text-jojo-gold text-xs hidden md:inline">✨ Stand Power Activated ✨</span>
+              <span className="text-jojo-gold text-xs hidden md:inline">✨ 黄金小比已启动 ✨</span>
             </div>
             
             {/* 系统切换器 */}

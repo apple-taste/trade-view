@@ -12,7 +12,7 @@ const LocaleContext = createContext<LocaleContextType | undefined>(undefined);
 
 const translations: Record<Language, Record<string, string>> = {
   zh: {
-    'app.title': 'JOJOLAND 交易系统',
+    'app.title': '黄金小比交易管理系统',
     'nav.welcome': '欢迎',
     'nav.logout': '退出',
     'nav.resetLayout': '重置布局',
@@ -78,7 +78,7 @@ const translations: Record<Language, Record<string, string>> = {
     'forex.brokerSettings': '经纪商设置',
   },
   en: {
-    'app.title': 'JOJOLAND Trading System',
+    'app.title': 'Golden Xiaobi Trading Manager',
     'nav.welcome': 'Welcome',
     'nav.logout': 'Logout',
     'nav.resetLayout': 'Reset layout',
